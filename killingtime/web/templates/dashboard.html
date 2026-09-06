@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+{% set z = summary.zone %}
+<div class="page-head">
+  <div>
+    <h1>{{ z.name }} <span class="pill {{ summary.difficulty_name|lower }}">{{ summary.difficulty_name }}</span></h1>
+    <small>{{ summary.first_pull_date or '—' }} → {{ summary.last_pull_date or '—' }}
+      {% if z.rio_raid_slug %}· <a href="/rivals?raid={{ z.rio_raid_slug }}&difficulty={{ difficulty }}">realm standings</a>{% endif %}</small>
+  </div>
+  <div class="filters">
+    <form method="get" action="/">
+      <select class="control" name="zone" onchange="this.form.submit()">
+        {% for t in overview.tiers %}<option value="{{ t.id }}" {{ 'selected' if t.id == zone_id }}>{{ t.name }} — {{ t.summary }}</option>{% endfor %}
+      </select>
+      <input type="hidden" name="difficulty" value="{{ difficulty }}">
+    </form>
+    <span class="seg">
+      {% for d in (5, 4, 3) %}<a href="/?zone={{ zone_id }}&difficulty={{ d }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}
+    </span>
+  </div>
+</div>
+
+<div class="tiles">
+  <div class="tile hero">
+    <div class="label">Progress</div>
+    <div class="value">{{ summary.killed }}<span class="muted">/{{ summary.total_bosses }}</span></div>
+    <div class="progress"><span style="width: {{ (100 * summary.killed / summary.total_bosses) if summary.total_bosses else 0 }}%"></span></div>
+    <div class="sub">{% if summary.cleared %}Cleared{% elif summary.next_boss %}Next: {{ summary.next_boss.name }}{% if summary.next_boss.best_pct is not none %} · best {{ summary.next_boss.best_pct|round(1) }}%{% endif %}{% else %}No pulls yet{% endif %}</div>
+  </div>
+  <div class="tile"><div class="label">Pulls</div><div class="value">{{ summary.pulls|num }}</div><div class="sub">{{ summary.kills }} kills · {{ summary.wipes }} wipes</div></div>
+  <div class="tile"><div class="label">Raid nights</div><div class="value">{{ summary.nights }}</div><div class="sub">{{ summary.hours }} h in combat</div></div>
+  <div class="tile"><div class="label">Days to latest kill</div><div class="value">{{ summary.days_to_latest_kill if summary.days_to_latest_kill is not none else '—' }}</div><div class="sub">since first pull {{ summary.first_pull_date or '' }}</div></div>
+  <div class="tile"><div class="label">Avg item level</div><div class="value">{{ summary.avg_ilvl or '—' }}</div><div class="sub">across logged pulls</div></div>
+  {% for r in overview.raiderio if r.raid_slug == z.rio_raid_slug %}
+  <div class="tile"><div class="label">Raider.IO rank</div>
+    <div class="value small">{{ r.summary }}</div>
+    <div class="sub">{% if r.mythic_world %}M: world #{{ r.mythic_world|num }} · realm #{{ r.mythic_realm }}{% elif r.heroic_world %}H: world #{{ r.heroic_world|num }} · realm #{{ r.heroic_realm }}{% endif %}</div></div>
+  {% endfor %}
+  {% for rk in rankings if rk.metric == 'progress' and rk.world_rank %}
+  <div class="tile"><div class="label">WCL progress rank</div><div class="value small">World #{{ rk.world_rank|num }}</div><div class="sub">{{ settings.guild_region|upper }} #{{ rk.region_rank|num }} · realm #{{ rk.server_rank }}</div></div>
+  {% endfor %}
+</div>
+
+<div class="grid two" id="charts"></div>
+
+<div class="card" style="margin-top:1rem">
+  <h2>Boss by boss</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>#</th><th>Boss</th><th>First kill</th><th class="num">Pulls to kill</th><th class="num">Wipes</th><th class="num">Nights</th><th class="num">Hours</th><th class="num">Best wipe %</th><th class="num">Total pulls</th><th class="num">Kills</th></tr></thead>
+    <tbody>
+    {% for b in summary.bosses %}
+    <tr class="{{ 'killed' if b.killed }}">
+      <td>{{ b.ord }}</td><td>{{ b.name }}</td>
+      <td>{{ b.first_kill_date or ('in progress' if b.total_pulls else '—') }}</td>
+      <td class="num">{{ b.pulls_to_kill if b.killed else '—' }}</td>
+      <td class="num">{{ b.wipes_before_kill if b.killed else (b.total_pulls or '—') }}</td>
+      <td class="num">{{ b.nights_to_kill or '—' }}</td>
+      <td class="num">{{ b.hours_to_kill|num(1) if b.hours_to_kill else '—' }}</td>
+      <td class="num">{{ b.best_pct|num(1) if b.best_pct is not none else '—' }}</td>
+      <td class="num">{{ b.total_pulls or 0 }}</td>
+      <td class="num">{{ b.total_kills or 0 }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">Other difficulties in this tier: {% for d, k in other_diffs.items() %}<a href="/?zone={{ zone_id }}&difficulty={{ d }}">{{ DIFFICULTIES[d] }} {{ k }}/{{ summary.total_bosses }}</a>{{ ' · ' if not loop.last }}{% endfor %}</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const data = {{ chart_data|safe }};
+  const root = document.getElementById("charts");
+  const s = data.summary;
+
+  // 1. Progression timeline: cumulative first kills by date (stepped line, single series).
+  if (data.timeline.length) {
+    KT.mount(root, {
+      title: "Progression timeline", type: "line", stepped: true,
+      labels: data.timeline.map((p) => p.date),
+      series: [{ name: "Bosses killed", data: data.timeline.map((p) => p.kills) }],
+      yTitle: "bosses killed", note: data.timeline.map((p) => `${p.date}: ${p.boss}`).slice(-3).join(" · "),
+      height: 280,
+    });
+  }
+
+  // 2. Pulls per boss: pulls to first kill, or pulls so far for bosses still in progress.
+  const bosses = s.bosses.filter((b) => (b.total_pulls || 0) > 0);
+  if (bosses.length) {
+    KT.mount(root, {
+      title: `Pulls per boss (${s.difficulty_name})`, type: "hbar",
+      labels: bosses.map((b) => b.killed ? b.name : `${b.name} (in progress)`),
+      series: [{ name: "Pulls", data: bosses.map((b) => b.killed ? b.pulls_to_kill : b.total_pulls) }],
+      yTitle: "pulls", note: "Killed bosses: pulls up to and including the first kill. In-progress bosses: pulls so far.",
+    });
+  }
+
+  // 3. Recent raid nights: kills and wipes stacked.
+  const nights = data.nights.filter((n) => n.difficulty === s.difficulty).slice().reverse();
+  if (nights.length) {
+    KT.mount(root, {
+      title: "Recent raid nights", type: "stacked",
+      labels: nights.map((n) => n.pull_date),
+      series: [
+        { name: "Kills", data: nights.map((n) => n.kills) },
+        { name: "Wipes", data: nights.map((n) => n.wipes) },
+      ],
+      yTitle: "pulls",
+    });
+  }
+})();
+</script>
+{% endblock %}

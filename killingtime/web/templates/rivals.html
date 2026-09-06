@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Rivals & realm{% endblock %}
+{% block content %}
+{% if not raid %}
+<div class="page-head"><h1>Rivals &amp; realm</h1></div>
+<div class="card"><p>No Raider.IO standings yet. Run a sync (Raider.IO needs no credentials) and make sure <code>RIVAL_GUILDS</code> in <code>.env</code> lists the guilds you care about.</p></div>
+{% else %}
+<div class="page-head">
+  <div><h1>{{ raid.name }} <span class="pill {{ comparison.difficulty_name|lower }}">{{ comparison.difficulty_name }}</span></h1>
+  <small>Realm standings from Raider.IO for {{ settings.guild_realm }} ({{ settings.guild_region|upper }}), plus configured rivals.</small></div>
+  <div class="filters">
+    <form method="get" action="/rivals">
+      <select class="control" name="raid" onchange="this.form.submit()">
+        {% for r in raids %}<option value="{{ r.slug }}" {{ 'selected' if r.slug == raid.slug }}>{{ r.name }}</option>{% endfor %}
+      </select>
+      <input type="hidden" name="difficulty" value="{{ difficulty }}">
+    </form>
+    <span class="seg">{% for d in (5, 4, 3) %}<a href="/rivals?raid={{ raid.slug }}&difficulty={{ d }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>Head to head</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Guild</th><th class="num">Realm #</th><th class="num">{{ settings.guild_region|upper }} #</th><th class="num">World #</th><th class="num">Killed</th><th class="num">Pulls</th>
+      {% for b in comparison.bosses %}<th class="num" title="{{ b.name }}">{{ b.ord }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for g in comparison.guilds %}
+    <tr class="{{ 'home' if g.is_home else ('rival' if g.is_rival) }}">
+      <td>{{ g.name }}{% if g.realm != settings.guild_realm|lower|replace(' ', '-') %} <small>({{ g.realm }})</small>{% endif %}</td>
+      <td class="num">{{ g.realm_rank or '—' }}</td><td class="num">{{ g.region_rank|num if g.region_rank else '—' }}</td><td class="num">{{ g.world_rank|num if g.world_rank else '—' }}</td>
+      <td class="num">{{ g.killed }}/{{ g.total }}</td><td class="num">{{ g.pulls|num if g.pulls else '—' }}</td>
+      {% for b in g.bosses %}<td class="num" title="{{ b.boss }}{% if b.pulls %} · {{ b.pulls }} pulls{% endif %}{% if b.best_pct is not none and not b.killed %} · best {{ b.best_pct }}%{% endif %}">
+        {% if b.killed %}<span class="pill good">{{ b.first_kill[5:] if b.first_kill else '✓' }}</span>{% elif b.pulls %}<span class="pill">{{ b.best_pct|round(0)|int if b.best_pct is not none else b.pulls }}%</span>{% else %}—{% endif %}</td>{% endfor %}
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">Boss columns: kill date (MM-DD) when killed, best remaining % when in progress. Bosses: {% for b in comparison.bosses %}{{ b.ord }} {{ b.name }}{{ ' · ' if not loop.last }}{% endfor %}.</p>
+</div>
+
+<div class="grid two" id="charts"></div>
+
+<div class="card" style="margin-top:1rem">
+  <h2>Realm standings <span class="tools muted">{{ standings|length }} guilds</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th class="num">#</th><th>Guild</th><th>Faction</th><th class="num">Killed</th><th class="num">Pulls</th><th>Latest kill</th><th>Working on</th><th class="num">{{ settings.guild_region|upper }} #</th></tr></thead>
+    <tbody>
+    {% for g in standings %}
+    <tr class="{{ 'home' if g.is_home else ('rival' if g.is_rival) }}">
+      <td class="num">{{ g.realm_rank }}</td><td>{{ g.name }}</td><td>{{ g.faction or '' }}</td>
+      <td class="num">{{ g.killed }}/{{ raid.bosses }}</td><td class="num">{{ g.pulls|num if g.pulls else '—' }}</td>
+      <td>{{ g.latest_kill|date }}</td><td>{{ g.current_prog or ('cleared' if g.killed == raid.bosses else '—') }}</td><td class="num">{{ g.region_rank|num if g.region_rank else '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if raid %}
+<script>
+(function () {
+  const data = {{ chart_data|safe }};
+  const root = document.getElementById("charts");
+  const guilds = data.comparison.guilds.slice(0, 8);
+
+  // Race: cumulative kills per guild over the union of kill dates (stepped).
+  const dates = [...new Set(data.race.flatMap((s) => s.points.map((p) => p.date)))].sort();
+  if (dates.length) {
+    const series = data.race.slice(0, 8).map((s) => {
+      let k = 0, i = 0;
+      const vals = dates.map((d) => { while (i < s.points.length && s.points[i].date <= d) { k = s.points[i].kills; i++; } return k; });
+      return { name: s.name, data: vals, emphasis: s.is_home };
+    });
+    KT.mount(root, { title: `Progress race (${data.comparison.difficulty_name})`, type: "line", stepped: true, labels: dates, series, yTitle: "bosses killed", note: "Source: Raider.IO first-kill timestamps. Killing Time is drawn thicker." });
+  }
+
+  // Pulls per boss per guild (grouped bars). Only guilds that publish pull counts.
+  const withPulls = guilds.filter((g) => g.pulls > 0);
+  if (withPulls.length) {
+    KT.mount(root, {
+      title: "Pulls per boss", type: "bar",
+      labels: data.comparison.bosses.map((b) => b.name),
+      series: withPulls.map((g) => ({ name: g.name, data: g.bosses.map((b) => b.pulls ?? null) })),
+      yTitle: "pulls", note: withPulls.length < guilds.length ? "Guilds that hide pull counts on Raider.IO are omitted." : "",
+    });
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

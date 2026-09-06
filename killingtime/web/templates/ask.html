@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Ask{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Ask about our progress ✦</h1><small>Claude queries the synced database (read-only) and answers with numbers and charts.</small></div>
+  <button class="btn secondary" type="button" id="clear">Clear conversation</button>
+</div>
+{% if not ask_enabled %}
+<div class="card"><p class="error">Ask is disabled: set <code>ANTHROPIC_API_KEY</code> in <code>.env</code> and restart <code>kt serve</code>. See <code>docs/SETUP.md</code>, step 5.</p></div>
+{% endif %}
+<div class="ask-layout">
+  <div>
+    <div class="chat" id="chat"></div>
+    <form class="ask-form" id="form">
+      <textarea id="q" placeholder="e.g. How many pulls did Ulatek take compared to the last boss of the previous tier?" {% if not ask_enabled %}disabled{% endif %}></textarea>
+      <button class="btn" type="submit" id="send" {% if not ask_enabled %}disabled{% endif %}>Ask</button>
+    </form>
+  </div>
+  <aside>
+    <div class="card">
+      <h2>Try asking</h2>
+      <div class="chips" id="chips">
+        <button class="chip">Where are we on the current tier and what's the next boss?</button>
+        <button class="chip">How many pulls did each mythic boss take this tier, and which took the longest?</button>
+        <button class="chip">Compare our pulls-to-kill by boss position with the previous tier.</button>
+        <button class="chip">How does our progress race compare to Internet Diff and Advance on the current raid?</button>
+        <button class="chip">Which realm guilds are within 2 bosses of us, and how many pulls have they used?</button>
+        <button class="chip">Show our kills per raid night over the last month.</button>
+        <button class="chip">Who has the best attendance this tier, and who's below 60%?</button>
+        <button class="chip">How many days did each tier take from first pull to cleared?</button>
+        <button class="chip">What was our best wipe on the boss we're currently progressing, and is it trending down?</button>
+      </div>
+      <p class="muted" style="margin-top:.75rem">Model: <code>{{ settings.ask_model }}</code> · effort <code>{{ settings.ask_effort }}</code>. Follow-up questions keep the last few turns as context.</p>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/marked.min.js"></script>
+<script>
+(function () {
+  const chat = document.getElementById("chat"), form = document.getElementById("form"), q = document.getElementById("q"), send = document.getElementById("send");
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem("kt-ask-history") || "[]"); } catch (e) { history = []; }
+  const save = () => { try { localStorage.setItem("kt-ask-history", JSON.stringify(history.slice(-12))); } catch (e) { /* ignore */ } };
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const md = (s) => (window.marked ? marked.parse(s, { breaks: true }) : esc(s).replace(/\n/g, "<br>"));
+
+  function addQ(text) { const d = document.createElement("div"); d.className = "msg q"; d.textContent = text; chat.appendChild(d); return d; }
+  function addA(res) {
+    const d = document.createElement("div"); d.className = "msg";
+    d.innerHTML = `<div class="answer">${md(res.answer)}</div>`;
+    if (res.charts && res.charts.length) {
+      const wrap = document.createElement("div"); wrap.className = "grid two"; wrap.style.marginTop = ".75rem";
+      res.charts.forEach((c) => { try { KT.renderSpec(wrap, c); } catch (e) { console.error(e); } });
+      d.appendChild(wrap);
+    }
+    if (res.trace && res.trace.length) {
+      const det = document.createElement("details");
+      det.innerHTML = `<summary>${res.trace.length} tool call${res.trace.length > 1 ? "s" : ""} · ${res.model || ""} · ${res.elapsed_s || ""}s</summary><ol class="trace">${res.trace.map((t) => `<li><b>${esc(t.tool)}</b>${t.error ? ' <span class="error">error</span>' : ""}<pre>${esc(t.tool === "run_sql" ? t.input.sql : JSON.stringify(t.input, null, 1))}</pre></li>`).join("")}</ol>`;
+      d.appendChild(det);
+    }
+    if (res.usage) {
+      const m = document.createElement("div"); m.className = "meta";
+      m.textContent = `tokens in ${res.usage.input_tokens} (cached ${res.usage.cache_read_input_tokens}) · out ${res.usage.output_tokens}`;
+      d.appendChild(m);
+    }
+    chat.appendChild(d);
+    return d;
+  }
+  history.forEach((h) => { addQ(h.question); addA({ answer: h.answer, charts: h.charts || [] }); });
+
+  async function ask(text) {
+    if (!text.trim()) return;
+    addQ(text);
+    const pending = document.createElement("div"); pending.className = "msg"; pending.innerHTML = '<span class="spinner"></span>Thinking… (this can take 10–60 seconds)'; chat.appendChild(pending);
+    send.disabled = true; q.value = "";
+    pending.scrollIntoView({ behavior: "smooth", block: "end" });
+    try {
+      const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: text, history: history.slice(-6).map((h) => ({ question: h.question, answer: h.answer })) }) });
+      const body = await r.json();
+      pending.remove();
+      if (!r.ok) { const e = document.createElement("div"); e.className = "msg error"; e.textContent = body.detail || "Request failed"; chat.appendChild(e); return; }
+      addA(body);
+      history.push({ question: text, answer: body.answer, charts: body.charts }); save();
+    } catch (err) {
+      pending.remove(); const e = document.createElement("div"); e.className = "msg error"; e.textContent = "Network error: " + err; chat.appendChild(e);
+    } finally { send.disabled = false; chat.lastElementChild && chat.lastElementChild.scrollIntoView({ behavior: "smooth", block: "end" }); }
+  }
+  form.addEventListener("submit", (e) => { e.preventDefault(); ask(q.value); });
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(q.value); } });
+  document.getElementById("chips").addEventListener("click", (e) => { if (e.target.classList.contains("chip")) ask(e.target.textContent); });
+  document.getElementById("clear").addEventListener("click", () => { history = []; save(); chat.innerHTML = ""; });
+})();
+</script>
+{% endblock %}

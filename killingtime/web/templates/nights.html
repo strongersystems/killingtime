@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Raid nights{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Raid nights</h1><small>One row per date and difficulty, from our Warcraft Logs pulls.</small></div>
+  <form method="get" action="/nights" class="filters">
+    <select class="control" name="zone" onchange="this.form.submit()">
+      {% for t in overview.tiers %}<option value="{{ t.id }}" {{ 'selected' if t.id == zone_id }}>{{ t.name }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+<div class="grid two" id="charts"></div>
+<div class="card" style="margin-top:1rem">
+  <h2>All nights</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Date</th><th>Difficulty</th><th class="num">Pulls</th><th class="num">Kills</th><th class="num">Wipes</th><th class="num">Bosses</th><th class="num">Hours in combat</th><th class="num">Avg ilvl</th><th>Killed</th></tr></thead>
+    <tbody>
+    {% for n in nights %}
+    <tr><td>{{ n.pull_date }}</td><td><span class="pill {{ DIFFICULTIES.get(n.difficulty, '')|lower }}">{{ DIFFICULTIES.get(n.difficulty, n.difficulty) }}</span></td>
+      <td class="num">{{ n.pulls }}</td><td class="num">{{ n.kills }}</td><td class="num">{{ n.wipes }}</td><td class="num">{{ n.bosses_pulled }}</td>
+      <td class="num">{{ n.hours_in_combat }}</td><td class="num">{{ n.avg_ilvl or '—' }}</td><td>{{ (n.killed_bosses or '').replace(',', ', ') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const nights = {{ chart_data|safe }};
+  if (!nights.length) return;
+  const root = document.getElementById("charts");
+  const diffs = [...new Set(nights.map((n) => n.difficulty))].sort((a, b) => b - a);
+  const names = { 5: "Mythic", 4: "Heroic", 3: "Normal", 1: "LFR" };
+  const top = nights.filter((n) => n.difficulty === diffs[0]).slice().reverse().slice(-40);
+  KT.mount(root, {
+    title: `Pulls per night (${names[diffs[0]] || diffs[0]})`, type: "stacked", labels: top.map((n) => n.pull_date),
+    series: [{ name: "Kills", data: top.map((n) => n.kills) }, { name: "Wipes", data: top.map((n) => n.wipes) }], yTitle: "pulls",
+  });
+  KT.mount(root, {
+    title: "Hours in combat per night", type: "bar", labels: top.map((n) => n.pull_date),
+    series: [{ name: "Hours", data: top.map((n) => n.hours_in_combat) }], yTitle: "hours",
+  });
+})();
+</script>
+{% endblock %}

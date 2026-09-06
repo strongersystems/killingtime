@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Get started{% endblock %}
+{% block content %}
+<div class="page-head"><h1>No raid data yet</h1></div>
+<div class="grid two">
+  <div class="card">
+    <h2>Run your first sync</h2>
+    <p>The database is empty. Sync pulls your guild's reports and pulls from Warcraft Logs and realm standings from Raider.IO.</p>
+    <ol class="steps">
+      <li>Fill in <code>.env</code> (see <code>docs/SETUP.md</code>) — at minimum <code>WCL_CLIENT_ID</code> and <code>WCL_CLIENT_SECRET</code>.</li>
+      <li>Run <code>kt check</code> to confirm both APIs answer.</li>
+      <li>Run <code>kt sync</code>, or press the button on the right.</li>
+    </ol>
+    {% if overview.raiderio %}
+    <p class="muted">Raider.IO already knows the guild:
+      {% for r in overview.raiderio %}<span class="pill">{{ r.name or r.raid_slug }} {{ r.summary }}</span> {% endfor %}
+    </p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>Sync now</h2>
+    <form method="post" action="/sync">
+      <button class="btn" type="submit" {% if sync_running %}disabled{% endif %}>{% if sync_running %}Sync running…{% else %}Start sync{% endif %}</button>
+      <span class="muted"> Warcraft Logs {% if settings.wcl_configured %}configured{% else %}<b>not configured</b>{% endif %} · Ask {% if ask_enabled %}enabled{% else %}disabled{% endif %}</span>
+    </form>
+    <p class="muted">Progress appears on the <a href="/status">Status</a> page.</p>
+  </div>
+</div>
+{% endblock %}

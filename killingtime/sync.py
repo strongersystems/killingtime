@@ -1,0 +1,565 @@
+"""Pull data from Warcraft Logs and Raider.IO into SQLite.
+
+Run with ``kt sync`` (incremental) or ``kt sync --full``. Every step is independent and
+tolerant of the other source being unavailable, so the app works with only Warcraft Logs
+credentials, only Raider.IO (no credentials needed), or both.
+"""
+
+from __future__ import annotations
+
+import difflib
+import json
+import logging
+import re
+import sqlite3
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from .config import GuildRef, Settings
+from .db import RIO_DIFFICULTY_TO_CODE, set_meta, transaction
+from .raiderio import RaiderIOClient, RaiderIOError
+from .wcl import WCLClient, WCLError
+
+log = logging.getLogger(__name__)
+
+Progress = Callable[[str], None]
+
+
+@dataclass
+class SyncStats:
+    zones: int = 0
+    encounters: int = 0
+    reports: int = 0
+    fights: int = 0
+    attendance_rows: int = 0
+    rio_guilds: int = 0
+    rio_progress_rows: int = 0
+    warnings: list[str] = field(default_factory=list)
+    wcl_queries: int = 0
+    rio_requests: int = 0
+
+    def warn(self, msg: str, progress: Progress | None = None) -> None:
+        self.warnings.append(msg)
+        log.warning(msg)
+        if progress:
+            progress("warning: " + msg)
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def iso_to_ms(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def slugify(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower().replace("'", ""))
+    return s.strip("-")
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower().replace("the ", ""))
+
+
+def match_name(target: str, candidates: dict[str, str], cutoff: float = 0.8) -> str | None:
+    """Match ``target`` (a name) to one of ``candidates`` {slug: name}. Exact slug/norm first, then fuzzy."""
+    t_slug, t_norm = slugify(target), _norm(target)
+    for slug, name in candidates.items():
+        if slug == t_slug or _norm(name) == t_norm or slug.replace("-", "") == t_norm:
+            return slug
+    best, best_ratio = None, 0.0
+    for slug, name in candidates.items():
+        ratio = max(
+            difflib.SequenceMatcher(None, t_norm, _norm(name)).ratio(),
+            difflib.SequenceMatcher(None, t_norm, slug.replace("-", "")).ratio(),
+        )
+        if ratio > best_ratio:
+            best, best_ratio = slug, ratio
+    return best if best_ratio >= cutoff else None
+
+
+# ---------------------------------------------------------------------------------------- guilds
+def upsert_guild(
+    conn: sqlite3.Connection,
+    ref: GuildRef,
+    *,
+    faction: str | None = None,
+    wcl_id: int | None = None,
+    rio_id: int | None = None,
+    is_home: bool | None = None,
+    is_rival: bool | None = None,
+) -> int:
+    conn.execute(
+        "INSERT OR IGNORE INTO guilds(name, realm_slug, region) VALUES (?, ?, ?)",
+        (ref.name, ref.realm_slug.lower(), ref.region.lower()),
+    )
+    row = conn.execute(
+        "SELECT id FROM guilds WHERE lower(name) = lower(?) AND realm_slug = ? AND region = ?",
+        (ref.name, ref.realm_slug.lower(), ref.region.lower()),
+    ).fetchone()
+    gid = int(row["id"])
+    sets, params = [], []
+    if faction is not None:
+        sets.append("faction = ?")
+        params.append(faction.lower())
+    if wcl_id is not None:
+        sets.append("wcl_id = ?")
+        params.append(wcl_id)
+    if rio_id is not None:
+        sets.append("rio_id = ?")
+        params.append(rio_id)
+    if is_home is not None:
+        sets.append("is_home = ?")
+        params.append(int(is_home))
+    if is_rival is not None:
+        sets.append("is_rival = ?")
+        params.append(int(is_rival))
+    if sets:
+        conn.execute(f"UPDATE guilds SET {', '.join(sets)} WHERE id = ?", (*params, gid))
+    return gid
+
+
+# ------------------------------------------------------------------------------------------ WCL
+def sync_zones(conn: sqlite3.Connection, wcl: WCLClient, n_expansions: int, stats: SyncStats, progress: Progress) -> None:
+    expansions = sorted(wcl.expansions(), key=lambda e: e["id"], reverse=True)[: max(1, n_expansions)]
+    with transaction(conn):
+        for exp in expansions:
+            conn.execute(
+                "INSERT INTO expansions(id, name) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                (exp["id"], exp["name"]),
+            )
+            zones = wcl.zones(exp["id"])
+            progress(f"expansion {exp['name']}: {len(zones)} zones")
+            for z in zones:
+                conn.execute(
+                    """INSERT INTO zones(id, name, expansion_id, frozen) VALUES (?, ?, ?, ?)
+                       ON CONFLICT(id) DO UPDATE SET name = excluded.name, expansion_id = excluded.expansion_id,
+                       frozen = excluded.frozen""",
+                    (z["id"], z["name"], exp["id"], int(bool(z.get("frozen")))),
+                )
+                stats.zones += 1
+                for i, enc in enumerate(z.get("encounters") or []):
+                    conn.execute(
+                        """INSERT INTO encounters(id, zone_id, name, ord) VALUES (?, ?, ?, ?)
+                           ON CONFLICT(id) DO UPDATE SET zone_id = excluded.zone_id, name = excluded.name, ord = excluded.ord""",
+                        (enc["id"], z["id"], enc["name"], i + 1),
+                    )
+                    stats.encounters += 1
+
+
+def sync_home_guild_wcl(conn: sqlite3.Connection, wcl: WCLClient, settings: Settings, stats: SyncStats, progress: Progress) -> int:
+    ref = settings.home_guild
+    info = wcl.guild(ref.name, ref.realm_slug, ref.region.upper())
+    if not info:
+        raise WCLError(
+            f"Guild '{ref.name}' on {ref.realm_slug}/{ref.region.upper()} not found on Warcraft Logs. "
+            "Check GUILD_NAME / GUILD_REALM / GUILD_REGION."
+        )
+    faction = (info.get("faction") or {}).get("name")
+    with transaction(conn):
+        gid = upsert_guild(conn, ref, faction=faction, wcl_id=int(info["id"]), is_home=True)
+    progress(f"home guild: {info['name']} (WCL id {info['id']}, {faction})")
+    return gid
+
+
+def sync_reports(
+    conn: sqlite3.Connection, wcl: WCLClient, guild_id: int, wcl_guild_id: int, full: bool, stats: SyncStats, progress: Progress
+) -> list[int]:
+    """Fetch report list (incrementally) and boss fights for new/updated reports. Returns touched zone ids."""
+    since: float | None = None
+    if not full:
+        row = conn.execute("SELECT MAX(end_time) AS m FROM reports WHERE guild_id = ?", (guild_id,)).fetchone()
+        if row and row["m"]:
+            since = float(row["m"]) - 3 * 86400_000  # re-check the last 3 days for late uploads/edits
+    known_zones = {r["id"] for r in conn.execute("SELECT id FROM zones")}
+    reports = wcl.all_reports(wcl_guild_id, start_time=since)
+    progress(f"reports listed: {len(reports)}" + (f" since {datetime.fromtimestamp(since / 1000, UTC):%Y-%m-%d}" if since else ""))
+    touched: set[int] = set()
+    with transaction(conn):
+        for rep in reports:
+            zone = rep.get("zone") or {}
+            zid = zone.get("id")
+            if not zid or zid not in known_zones:
+                continue  # dungeons, PvP, or zones from expansions we don't track
+            conn.execute(
+                """INSERT INTO reports(code, guild_id, zone_id, title, owner, start_time, end_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(code) DO UPDATE SET zone_id = excluded.zone_id, title = excluded.title,
+                       end_time = excluded.end_time,
+                       fights_synced_at = CASE WHEN excluded.end_time > reports.end_time THEN NULL ELSE reports.fights_synced_at END""",
+                (
+                    rep["code"],
+                    guild_id,
+                    zid,
+                    rep.get("title"),
+                    (rep.get("owner") or {}).get("name"),
+                    int(rep["startTime"]),
+                    int(rep["endTime"]),
+                ),
+            )
+            stats.reports += 1
+            touched.add(int(zid))
+
+    pending = [
+        r["code"]
+        for r in conn.execute(
+            "SELECT code FROM reports WHERE guild_id = ? AND fights_synced_at IS NULL ORDER BY start_time", (guild_id,)
+        )
+    ]
+    progress(f"fetching fights for {len(pending)} reports")
+    known_encounters = {r["id"]: r["zone_id"] for r in conn.execute("SELECT id, zone_id FROM encounters")}
+    for i in range(0, len(pending), 40):
+        group = pending[i : i + 40]
+        fights_by_code = wcl.report_fights(group)
+        with transaction(conn):
+            for code in group:
+                conn.execute("DELETE FROM fights WHERE report_code = ?", (code,))
+                rep_start = conn.execute("SELECT start_time, zone_id FROM reports WHERE code = ?", (code,)).fetchone()
+                for f in fights_by_code.get(code, []):
+                    enc_id = int(f.get("encounterID") or 0)
+                    if enc_id == 0 or enc_id not in known_encounters:
+                        continue
+                    conn.execute(
+                        """INSERT OR REPLACE INTO fights(report_code, fight_id, encounter_id, name, difficulty, kill,
+                               start_time, end_time, boss_pct, fight_pct, last_phase, size, avg_ilvl)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            code,
+                            int(f["id"]),
+                            enc_id,
+                            f.get("name"),
+                            f.get("difficulty"),
+                            1 if f.get("kill") else 0,
+                            rep_start["start_time"] + int(f["startTime"]),
+                            rep_start["start_time"] + int(f["endTime"]),
+                            f.get("bossPercentage"),
+                            f.get("fightPercentage"),
+                            f.get("lastPhase"),
+                            f.get("size"),
+                            f.get("averageItemLevel"),
+                        ),
+                    )
+                    stats.fights += 1
+                    touched.add(int(known_encounters[enc_id]))
+                conn.execute("UPDATE reports SET fights_synced_at = ? WHERE code = ?", (now_ms(), code))
+        progress(f"  fights: {min(i + 40, len(pending))}/{len(pending)} reports")
+    return sorted(touched)
+
+
+def sync_zone_rankings(conn: sqlite3.Connection, wcl: WCLClient, guild_id: int, wcl_guild_id: int, zone_ids: list[int], stats: SyncStats, progress: Progress) -> None:
+    for zid in zone_ids:
+        try:
+            rk = wcl.guild_zone_ranking(wcl_guild_id, zid, difficulty=5)
+        except WCLError as exc:
+            stats.warn(f"zone ranking unavailable for zone {zid}: {exc}", progress)
+            continue
+        with transaction(conn):
+            for metric in ("progress", "speed", "completeRaidSpeed"):
+                pos = rk.get(metric) or {}
+                if not pos:
+                    continue
+
+                def num(k: str, f: str = "number", _pos: dict = pos):
+                    return (_pos.get(k) or {}).get(f)
+
+                conn.execute(
+                    """INSERT OR REPLACE INTO wcl_zone_rankings(guild_id, zone_id, metric, difficulty, world_rank, world_pct,
+                           region_rank, region_pct, server_rank, server_pct, fetched_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        guild_id, zid, metric, None if metric == "progress" else 5,
+                        num("worldRank"), num("worldRank", "percentile"),
+                        num("regionRank"), num("regionRank", "percentile"),
+                        num("serverRank"), num("serverRank", "percentile"),
+                        now_ms(),
+                    ),
+                )
+        progress(f"zone ranking synced for zone {zid}")
+
+
+def sync_attendance(conn: sqlite3.Connection, wcl: WCLClient, wcl_guild_id: int, zone_ids: list[int], stats: SyncStats, progress: Progress) -> None:
+    known_reports = {r["code"] for r in conn.execute("SELECT code FROM reports")}
+    for zid in zone_ids:
+        try:
+            rows = wcl.all_attendance(wcl_guild_id, zone_id=zid)
+        except WCLError as exc:
+            stats.warn(f"attendance unavailable for zone {zid}: {exc}", progress)
+            continue
+        with transaction(conn):
+            for rep in rows:
+                code = rep.get("code")
+                if code not in known_reports:
+                    continue
+                conn.execute("DELETE FROM attendance WHERE report_code = ?", (code,))
+                for p in rep.get("players") or []:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO attendance(report_code, player_name, player_class, presence) VALUES (?, ?, ?, ?)",
+                        (code, p["name"], p.get("type"), int(p.get("presence") or 1)),
+                    )
+                    stats.attendance_rows += 1
+        progress(f"attendance synced for zone {zid}: {len(rows)} reports")
+
+
+# ------------------------------------------------------------------------------------ Raider.IO
+def _store_profile(conn: sqlite3.Connection, ref: GuildRef, prof: dict, *, is_home: bool, is_rival: bool) -> int:
+    gid = upsert_guild(conn, ref, faction=prof.get("faction"), is_home=is_home if is_home else None, is_rival=is_rival if is_rival else None)
+    ts = now_ms()
+    for slug, s in (prof.get("raid_progression") or {}).items():
+        conn.execute(
+            """INSERT OR REPLACE INTO rio_summary(guild_id, raid_slug, summary, total_bosses, normal_killed, heroic_killed, mythic_killed, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (gid, slug, s.get("summary"), s.get("total_bosses"), s.get("normal_bosses_killed"), s.get("heroic_bosses_killed"), s.get("mythic_bosses_killed"), ts),
+        )
+    for slug, ranks in (prof.get("raid_rankings") or {}).items():
+        for diff_name, code in RIO_DIFFICULTY_TO_CODE.items():
+            r = ranks.get(diff_name) or {}
+            conn.execute(
+                """INSERT INTO rio_rankings(guild_id, raid_slug, difficulty, world_rank, region_rank, realm_rank, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(guild_id, raid_slug, difficulty) DO UPDATE SET world_rank = excluded.world_rank,
+                       region_rank = excluded.region_rank, realm_rank = excluded.realm_rank, fetched_at = excluded.fetched_at""",
+                (gid, slug, code, r.get("world"), r.get("region"), r.get("realm"), ts),
+            )
+    return gid
+
+
+def _store_ranking_entry(conn: sqlite3.Connection, entry: dict, raid_slug: str, difficulty: int, ts: int) -> int:
+    g = entry["guild"]
+    ref = GuildRef(g["name"], (g.get("realm") or {}).get("slug", ""), (g.get("region") or {}).get("slug", ""))
+    gid = upsert_guild(conn, ref, faction=g.get("faction"), rio_id=g.get("id"))
+    conn.execute(
+        """INSERT INTO rio_rankings(guild_id, raid_slug, difficulty, world_rank, region_rank, realm_rank, fetched_at)
+           VALUES (?, ?, ?, NULL, ?, ?, ?)
+           ON CONFLICT(guild_id, raid_slug, difficulty) DO UPDATE SET region_rank = excluded.region_rank,
+               realm_rank = excluded.realm_rank, fetched_at = excluded.fetched_at""",
+        (gid, raid_slug, difficulty, entry.get("regionRank"), entry.get("rank"), ts),
+    )
+    pulled = {p["slug"]: p for p in entry.get("encountersPulled") or []}
+    defeated = {d["slug"]: d for d in entry.get("encountersDefeated") or []}
+    for slug in set(pulled) | set(defeated):
+        d, p = defeated.get(slug, {}), pulled.get(slug, {})
+        conn.execute(
+            """INSERT OR REPLACE INTO rio_progress(guild_id, raid_slug, difficulty, encounter_slug, first_defeated, last_defeated,
+                   num_pulls, best_percent, is_defeated, pull_started_at, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                gid, raid_slug, difficulty, slug,
+                iso_to_ms(d.get("firstDefeated")), iso_to_ms(d.get("lastDefeated")),
+                p.get("numPulls"), p.get("bestPercent"),
+                1 if d else int(bool(p.get("isDefeated"))),
+                iso_to_ms(p.get("pullStartedAt")), ts,
+            ),
+        )
+    return gid
+
+
+def _load_rio_static(conn: sqlite3.Connection, rio: RaiderIOClient, wanted_slugs: set[str], stats: SyncStats, progress: Progress) -> None:
+    """Fetch Raider.IO raid/boss reference data, trying expansion ids from newest downwards until all slugs are known."""
+    known = {r["slug"] for r in conn.execute("SELECT slug FROM rio_raids")}
+    missing = wanted_slugs - known
+    if not missing:
+        return
+    for exp_id in range(13, 7, -1):
+        try:
+            data = rio.static_data(exp_id)
+        except RaiderIOError:
+            continue
+        raids = data.get("raids") or []
+        if not raids:
+            continue
+        with transaction(conn):
+            for i, raid in enumerate(raids):
+                conn.execute(
+                    "INSERT OR REPLACE INTO rio_raids(slug, name, expansion_id, ord) VALUES (?, ?, ?, ?)",
+                    (raid["slug"], raid["name"], exp_id, raid.get("id") or i),
+                )
+                for j, enc in enumerate(raid.get("encounters") or []):
+                    conn.execute(
+                        "INSERT OR REPLACE INTO rio_encounters(raid_slug, slug, name, ord) VALUES (?, ?, ?, ?)",
+                        (raid["slug"], enc["slug"], enc["name"], enc.get("ordinal", j) if isinstance(enc.get("ordinal"), int) else j + 1),
+                    )
+                missing.discard(raid["slug"])
+        progress(f"raider.io static data for expansion {exp_id}: {len(raids)} raids")
+        if not missing:
+            break
+    if missing:
+        stats.warn(f"raider.io static data not found for raids: {sorted(missing)}", progress)
+
+
+def map_zones_to_rio(conn: sqlite3.Connection, tier_map: dict[int, str], stats: SyncStats, progress: Progress) -> None:
+    """Link Warcraft Logs zones/encounters to Raider.IO raids/bosses by name (with manual overrides)."""
+    raids = {r["slug"]: r["name"] for r in conn.execute("SELECT slug, name FROM rio_raids")}
+    if not raids:
+        return
+    with transaction(conn):
+        for z in conn.execute("SELECT id, name FROM zones").fetchall():
+            slug = tier_map.get(int(z["id"])) or match_name(z["name"], raids, cutoff=0.85)
+            if not slug:
+                continue
+            conn.execute("UPDATE zones SET rio_raid_slug = ? WHERE id = ?", (slug, z["id"]))
+            bosses = {r["slug"]: r["name"] for r in conn.execute("SELECT slug, name FROM rio_encounters WHERE raid_slug = ?", (slug,))}
+            for e in conn.execute("SELECT id, name FROM encounters WHERE zone_id = ?", (z["id"],)).fetchall():
+                bslug = match_name(e["name"], bosses, cutoff=0.7)
+                if bslug:
+                    conn.execute("UPDATE encounters SET rio_encounter_slug = ? WHERE id = ?", (bslug, e["id"]))
+                else:
+                    stats.warn(f"no raider.io boss match for '{e['name']}' in {z['name']}", progress)
+    mapped = conn.execute("SELECT COUNT(*) AS c FROM zones WHERE rio_raid_slug IS NOT NULL").fetchone()["c"]
+    progress(f"zone mapping: {mapped} zones linked to raider.io raids")
+
+
+def sync_raiderio(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Settings, stats: SyncStats, progress: Progress) -> None:
+    home = settings.home_guild
+    try:
+        prof = rio.guild_profile(home.region, home.realm_slug, home.name)
+    except RaiderIOError as exc:
+        stats.warn(f"raider.io profile for {home.name} failed: {exc}", progress)
+        return
+    with transaction(conn):
+        home_id = _store_profile(conn, home, prof, is_home=True, is_rival=False)
+    raid_slugs = set((prof.get("raid_progression") or {}).keys())
+    progress(f"raider.io profile: {home.name} ({prof.get('faction')}) raids: {sorted(raid_slugs)}")
+
+    rival_realms: set[tuple[str, str]] = set()
+    with transaction(conn):
+        conn.execute("UPDATE guilds SET is_rival = 0")
+    for rival in settings.rivals:
+        try:
+            rp = rio.guild_profile(rival.region, rival.realm_slug, rival.name)
+        except RaiderIOError as exc:
+            stats.warn(f"raider.io profile for rival {rival.name} failed: {exc}", progress)
+            continue
+        with transaction(conn):
+            _store_profile(conn, rival, rp, is_home=False, is_rival=True)
+        raid_slugs |= set((rp.get("raid_progression") or {}).keys())
+        if (rival.realm_slug, rival.region) != (home.realm_slug, home.region):
+            rival_realms.add((rival.realm_slug, rival.region))
+        stats.rio_guilds += 1
+
+    _load_rio_static(conn, rio, raid_slugs, stats, progress)
+    map_zones_to_rio(conn, settings.tier_map_dict, stats, progress)
+
+    # Only scan real raids (skip 1-boss world-boss "raids") to save requests.
+    placeholders = ",".join("?" * len(raid_slugs))
+    scan_raids = [
+        r["slug"]
+        for r in conn.execute(
+            f"SELECT slug FROM rio_raids WHERE slug IN ({placeholders}) "
+            "AND (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = rio_raids.slug) > 1 ORDER BY ord DESC",
+            tuple(raid_slugs),
+        )
+    ] if raid_slugs else []
+    ts = now_ms()
+    realms = [(home.realm_slug, home.region)] + sorted(rival_realms)
+    for realm_slug, region in realms:
+        pages = settings.rio_realm_scan_pages if (realm_slug, region) == (home.realm_slug, home.region) else 1
+        for raid_slug in scan_raids:
+            for diff_name, code in RIO_DIFFICULTY_TO_CODE.items():
+                seen_home = False
+                for page in range(pages):
+                    try:
+                        entries = rio.raid_rankings(raid_slug, diff_name, region, realm=realm_slug, page=page)
+                    except RaiderIOError as exc:
+                        stats.warn(f"raid rankings {raid_slug}/{diff_name} p{page} failed: {exc}", progress)
+                        break
+                    with transaction(conn):
+                        for entry in entries:
+                            gid = _store_ranking_entry(conn, entry, raid_slug, code, ts)
+                            stats.rio_progress_rows += len(entry.get("encountersPulled") or []) + len(entry.get("encountersDefeated") or [])
+                            if gid == home_id:
+                                seen_home = True
+                    if len(entries) < 100:
+                        break
+                # Make sure the home guild's own per-boss data is present even if it is deep in the standings.
+                if (realm_slug, region) == (home.realm_slug, home.region) and not seen_home:
+                    rank_row = conn.execute(
+                        "SELECT realm_rank FROM rio_rankings WHERE guild_id = ? AND raid_slug = ? AND difficulty = ?",
+                        (home_id, raid_slug, code),
+                    ).fetchone()
+                    if rank_row and rank_row["realm_rank"]:
+                        page = (int(rank_row["realm_rank"]) - 1) // 100
+                        if page >= pages:
+                            try:
+                                entries = rio.raid_rankings(raid_slug, diff_name, region, realm=realm_slug, page=page)
+                                with transaction(conn):
+                                    for entry in entries:
+                                        if entry["guild"]["name"].lower() == home.name.lower():
+                                            _store_ranking_entry(conn, entry, raid_slug, code, ts)
+                            except RaiderIOError as exc:
+                                stats.warn(f"could not fetch home guild page for {raid_slug}/{diff_name}: {exc}", progress)
+            progress(f"raider.io realm standings synced: {realm_slug}/{region} {raid_slug}")
+    stats.rio_guilds = conn.execute("SELECT COUNT(*) AS c FROM guilds").fetchone()["c"]
+
+
+# ------------------------------------------------------------------------------------- orchestrate
+def run_sync(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    wcl: WCLClient | None,
+    rio: RaiderIOClient | None,
+    *,
+    full: bool = False,
+    skip_attendance: bool = False,
+    progress: Progress | None = None,
+) -> SyncStats:
+    progress = progress or (lambda msg: log.info(msg))
+    stats = SyncStats()
+    started = now_ms()
+    cur = conn.execute("INSERT INTO sync_log(started_at, status) VALUES (?, 'running')", (started,))
+    log_id = cur.lastrowid
+    conn.commit()
+    status = "ok"
+    try:
+        if wcl is not None:
+            progress("== Warcraft Logs ==")
+            sync_zones(conn, wcl, settings.sync_expansions, stats, progress)
+            gid = sync_home_guild_wcl(conn, wcl, settings, stats, progress)
+            wcl_gid = conn.execute("SELECT wcl_id FROM guilds WHERE id = ?", (gid,)).fetchone()["wcl_id"]
+            touched = sync_reports(conn, wcl, gid, wcl_gid, full, stats, progress)
+            active_zones = [
+                r["zone_id"]
+                for r in conn.execute(
+                    "SELECT DISTINCT zone_id FROM reports WHERE guild_id = ? ORDER BY zone_id DESC LIMIT 4", (gid,)
+                )
+            ]
+            rank_zones = sorted(set(active_zones) | set(touched))[-4:]
+            sync_zone_rankings(conn, wcl, gid, wcl_gid, rank_zones, stats, progress)
+            if not skip_attendance:
+                sync_attendance(conn, wcl, wcl_gid, active_zones[:3], stats, progress)
+            stats.wcl_queries = wcl.queries_made
+            try:
+                rl = wcl.rate_limit()
+                set_meta(conn, "wcl_rate_limit", json.dumps(rl))
+                progress(f"WCL points used this hour: {rl.get('pointsSpentThisHour'):.0f}/{rl.get('limitPerHour')}")
+            except WCLError:
+                pass
+        else:
+            upsert_guild(conn, settings.home_guild, is_home=True)
+            conn.commit()
+            progress("Warcraft Logs credentials not set - skipping WCL sync (see docs/SETUP.md)")
+
+        if rio is not None:
+            progress("== Raider.IO ==")
+            sync_raiderio(conn, rio, settings, stats, progress)
+            stats.rio_requests = rio.requests_made
+        set_meta(conn, "last_sync", str(now_ms()))
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 - we want the log row to capture any failure
+        status = "error"
+        stats.warn(f"sync failed: {exc}", progress)
+        raise
+    finally:
+        conn.execute(
+            "UPDATE sync_log SET finished_at = ?, status = ?, detail = ? WHERE id = ?",
+            (now_ms(), status, json.dumps({k: v for k, v in stats.__dict__.items() if k != "warnings"} | {"warnings": stats.warnings[:50]}), log_id),
+        )
+        conn.commit()
+    return stats

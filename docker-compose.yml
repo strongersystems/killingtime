@@ -1,0 +1,14 @@
+services:
+  killingtime:
+    build: .
+    env_file: .env
+    environment:
+      KT_DB_PATH: /data/killingtime.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - kt-data:/data
+    restart: unless-stopped
+
+volumes:
+  kt-data:

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Status{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Status &amp; sync</h1><small>Last sync {{ overview.last_sync or 'never' }}.</small></div>
+  <form method="post" action="/sync" class="filters">
+    <button class="btn" type="submit" {% if sync.running %}disabled{% endif %}>{% if sync.running %}Sync running…{% else %}Sync now{% endif %}</button>
+    <button class="btn secondary" type="submit" formaction="/sync?full=true" {% if sync.running %}disabled{% endif %}>Full re-sync</button>
+  </form>
+</div>
+<div class="tiles">
+  {% for k, v in counts.items() %}<div class="tile"><div class="label">{{ k.replace('_', ' ') }}</div><div class="value small">{{ v|num }}</div></div>{% endfor %}
+  {% if rate_limit %}<div class="tile"><div class="label">WCL points this hour</div><div class="value small">{{ rate_limit.pointsSpentThisHour|round|int }}<span class="muted">/{{ rate_limit.limitPerHour }}</span></div><div class="sub">resets in {{ (rate_limit.pointsResetIn / 60)|round|int }} min</div></div>{% endif %}
+</div>
+<div class="grid two">
+  <div class="card">
+    <h2>Live sync log</h2>
+    <div class="log" id="livelog">{{ sync.log|join('\n') if sync.log else (sync.last_result or 'Idle.') }}</div>
+    <p class="muted">Configuration: Warcraft Logs {% if settings.wcl_configured %}✓{% else %}✗ not configured{% endif %} · Raider.IO ✓ (public) · Ask {% if ask_enabled %}✓{% else %}✗{% endif %} · rivals: {{ settings.rival_guilds or 'none' }}</p>
+  </div>
+  <div class="card">
+    <h2>Zone ↔ Raider.IO mapping</h2>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>WCL zone</th><th>Expansion</th><th class="num">Reports</th><th>Raider.IO raid</th><th class="num">Bosses mapped</th></tr></thead>
+      <tbody>{% for z in zones %}<tr><td>{{ z.name }} <small class="muted">#{{ z.id }}</small></td><td>{{ z.expansion or '' }}</td><td class="num">{{ z.reports }}</td>
+        <td>{{ z.rio_raid_slug or '<span class="muted">—</span>'|safe }}</td><td class="num">{{ z.mapped_bosses }}/{{ z.bosses }}</td></tr>{% endfor %}</tbody>
+    </table>
+    </div>
+    <p class="muted">Missing a mapping for a zone you raid? Set <code>TIER_MAP={"&lt;zone id&gt;": "&lt;raider.io slug&gt;"}</code> in <code>.env</code> and re-sync.</p>
+  </div>
+</div>
+<div class="card" style="margin-top:1rem">
+  <h2>Sync history</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Started</th><th>Status</th><th class="num">Reports</th><th class="num">Pulls</th><th class="num">RIO rows</th><th class="num">WCL queries</th><th>Warnings</th></tr></thead>
+    <tbody>{% for l in logs %}<tr><td>{{ l.started_at|date }} <small class="muted">{{ ((l.finished_at or l.started_at) - l.started_at) // 1000 }}s</small></td>
+      <td><span class="pill {{ 'good' if l.status == 'ok' else ('bad' if l.status == 'error') }}">{{ l.status }}</span></td>
+      <td class="num">{{ l.detail.reports if l.detail else '' }}</td><td class="num">{{ l.detail.fights if l.detail else '' }}</td><td class="num">{{ l.detail.rio_progress_rows if l.detail else '' }}</td><td class="num">{{ l.detail.wcl_queries if l.detail else '' }}</td>
+      <td>{% if l.detail and l.detail.warnings %}<details><summary>{{ l.detail.warnings|length }}</summary><ul>{% for w in l.detail.warnings %}<li><small>{{ w }}</small></li>{% endfor %}</ul></details>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const el = document.getElementById("livelog");
+  async function poll() {
+    try {
+      const r = await fetch("/api/sync/status"); const s = await r.json();
+      if (s.log.length) { el.textContent = s.log.join("\n"); el.scrollTop = el.scrollHeight; }
+      if (s.running) setTimeout(poll, 2000); else if (s.last_result && !el.textContent.includes(s.last_result)) { el.textContent += "\n" + s.last_result; setTimeout(() => location.reload(), 1500); }
+    } catch (e) { /* ignore */ }
+  }
+  {% if sync.running %}poll();{% endif %}
+})();
+</script>
+{% endblock %}
