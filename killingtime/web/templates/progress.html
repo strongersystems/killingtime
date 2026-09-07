@@ -112,11 +112,21 @@
   const root = document.getElementById("charts");
   const s = data.summary, peers = data.peers;
 
+  // Progression on a real time axis: one step per first kill, days since this team's first pull in the tier.
   if (data.timeline.length) {
-    const series = [{ name: "Bosses killed", data: data.timeline.map((p) => p.kills), emphasis: true }];
+    const us = [{ x: 0, y: 0, label: `Day 0 · first pull ${s.first_pull_date}` }]
+      .concat(data.timeline.map((p) => ({ x: p.day, y: p.kills, label: `${p.date} · ${p.boss}` })));
+    const series = [{ name: "Us", data: us, emphasis: true }];
+    if (peers && peers.peer_count) {
+      const typical = s.bosses.map((b) => b.peer && b.peer.peer_median_days).filter((d) => d !== null && d !== undefined).sort((a, b) => a - b);
+      if (typical.length) {
+        series.push({ name: "Typical peer", data: [{ x: 0, y: 0, label: "Day 0" }].concat(typical.map((d, i) => ({ x: d, y: i + 1, label: `Typical peer: boss ${i + 1} on day ${d}` }))) });
+      }
+    }
     KT.mount(root, {
-      title: "Progression timeline", type: "line", stepped: true, labels: data.timeline.map((p) => p.date), series,
-      yTitle: "bosses killed", note: data.timeline.map((p) => `${p.date}: ${p.boss}`).slice(-3).join(" · "),
+      title: "Progression timeline", type: "line", stepped: true, xLinear: true, xTickPrefix: "Day ", series,
+      xTitle: "days since first pull in this tier", yTitle: "bosses killed", yMax: s.total_bosses,
+      note: peers && peers.peer_count ? "Each step is a first kill (hover for the boss). Typical peer = median day on which guilds at our level got their nth kill; being above the orange line means ahead of them." : "Each step is a first kill; hover for the boss.",
     });
   }
 
@@ -128,21 +138,6 @@
       title: `Pulls per boss (${s.difficulty_name})`, type: "hbar", labels: bosses.map((b) => b.killed ? b.name : `${b.name} (in progress)`),
       series, yTitle: "pulls", note: peers && peers.peer_count ? "Peer median = guilds at a similar kill count on Raider.IO." : "",
     });
-  }
-
-  if (peers && peers.peer_count) {
-    const dated = s.bosses.filter((b) => b.peer && (b.peer.our_days !== null || b.peer.peer_median_days !== null));
-    if (dated.length > 1) {
-      KT.mount(root, {
-        title: "Days into the tier at each kill", type: "line", labels: dated.map((b) => b.name),
-        series: [
-          { name: "Us", data: dated.map((b) => b.peer.our_days), emphasis: true },
-          { name: "Typical peer", data: dated.map((b) => b.peer.peer_median_days) },
-          { name: "Peer P75", data: dated.map((b) => b.peer.peer_p75_days) },
-        ],
-        yTitle: "days since first pull", note: "Below the typical line = ahead of guilds at our level.",
-      });
-    }
   }
 
   const nights = data.nights.filter((n) => n.difficulty === s.difficulty).slice().reverse();

@@ -23,10 +23,13 @@
       },
       scales: {
         x: {
+          type: opts.xLinear ? "linear" : "category",
           title: { display: !!opts.xTitle, text: opts.xTitle, color: muted },
           grid: { color: grid, drawTicks: false }, border: { color: css("--grid") },
-          ticks: { color: muted, maxRotation: 0, autoSkip: true, font: { size: 11 } },
+          ticks: { color: muted, maxRotation: 0, autoSkip: true, font: { size: 11 },
+                   ...(opts.xLinear ? { precision: 0, callback: (v) => (opts.xTickPrefix || "") + v } : {}) },
           stacked: !!opts.stacked,
+          beginAtZero: !!opts.xLinear,
         },
         y: {
           title: { display: !!opts.yTitle, text: opts.yTitle, color: muted },
@@ -46,7 +49,7 @@
       borderColor: s.color || colors[i % colors.length],
       backgroundColor: s.color || colors[i % colors.length],
       borderWidth: s.emphasis ? 3 : 2,
-      pointRadius: labels.length > 60 ? 0 : 3,
+      pointRadius: (labels.length > 60 || (s.data.length > 60)) ? 0 : 3,
       pointHoverRadius: 5,
       pointBorderColor: css("--surface"),
       pointBorderWidth: 1,
@@ -82,6 +85,14 @@
     return new Chart(canvas, { type: "bar", data: { labels, datasets }, options });
   }
 
+  /* Table twin for x/y series: one row per point, oldest first. */
+  function xyTableHTML(series, xTitle, yTitle) {
+    const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    let h = `<table><thead><tr><th>Series</th><th class="num">${esc(xTitle || "x")}</th><th class="num">${esc(yTitle || "y")}</th><th>Detail</th></tr></thead><tbody>`;
+    series.forEach((s) => s.data.forEach((p) => { h += `<tr><td>${esc(s.name)}</td><td class="num">${esc(p.x)}</td><td class="num">${esc(p.y)}</td><td>${esc(p.label || "")}</td></tr>`; }));
+    return h + "</tbody></table>";
+  }
+
   function tableHTML(labels, series, corner = "") {
     const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     const fmt = (v) => (v === null || v === undefined ? "–" : typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(1)) : v);
@@ -93,18 +104,25 @@
   }
 
   /* Card with a chart, a "Table" toggle (the accessible twin), and an optional note. */
-  function mount(container, { title, labels, series, type = "bar", horizontal = false, stacked = false, stepped = false, xTitle, yTitle, note, height }) {
+  function mount(container, { title, labels = [], series, type = "bar", horizontal = false, stacked = false, stepped = false, xLinear = false, xTickPrefix, xTitle, yTitle, yMax, note, height }) {
     const card = document.createElement("div");
     card.className = "card";
     const id = "c" + Math.random().toString(36).slice(2, 9);
     const h = height || Math.max(260, horizontal ? 28 * labels.length + 60 : 280);
     card.innerHTML = `<h2><span>${title ? title.replace(/</g, "&lt;") : ""}</span><span class="tools"><button type="button" data-toggle="${id}">Table</button></span></h2>
       <div class="chart-wrap" style="height:${h}px"><canvas id="${id}"></canvas></div>
-      <div class="table-view" id="${id}-table">${tableHTML(labels, series)}</div>
+      <div class="table-view" id="${id}-table">${xLinear ? xyTableHTML(series, xTitle, yTitle) : tableHTML(labels, series)}</div>
       ${note ? `<div class="chart-note">${note.replace(/</g, "&lt;")}</div>` : ""}`;
     container.appendChild(card);
     const canvas = card.querySelector("canvas");
-    const opts = { xTitle, yTitle, stacked, stepped, horizontal };
+    const opts = { xTitle, yTitle, stacked, stepped, horizontal, xLinear, xTickPrefix, yMax };
+    if (xLinear) {
+      opts.mode = "nearest";
+      opts.tooltip = {
+        title: (items) => items.map((i) => i.raw.label || `${xTickPrefix || ""}${i.raw.x}`).join(" · "),
+        label: (i) => `${i.dataset.label}: ${i.raw.y}${yTitle ? " " + yTitle : ""} (${xTickPrefix || ""}${i.raw.x})`,
+      };
+    }
     if (type === "line") lineChart(canvas, labels, series, opts);
     else barChart(canvas, labels, series, { ...opts, horizontal: horizontal || type === "hbar", stacked: stacked || type === "stacked" });
     card.querySelector("[data-toggle]").addEventListener("click", (e) => {
