@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import sqlite3
 import statistics
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .db import CODE_TO_RIO_DIFFICULTY, DIFFICULTIES
 
 DAY_MS = 86_400_000
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 RAID_DIFFS = (5, 4, 3)
 
 
@@ -1211,6 +1213,54 @@ def boss_pulls(conn: sqlite3.Connection, zone_id: int, encounter_id: int, diffic
         "avg_ilvl": round(sum(ilvls) / len(ilvls), 1) if ilvls else None,
         "first_pull_date": pulls[0]["date"] if pulls else None,
         "last_pull_date": pulls[-1]["date"] if pulls else None,
+    }
+
+
+def raid_schedule(conn: sqlite3.Connection, team: str | None = None, months: int = 6) -> dict[str, Any]:
+    """When this guild actually raids, worked out from the logs rather than from a settings string.
+
+    Times come from the first and last pull of each night, in the realm's own time zone (Europe/Paris for EU
+    realms, which is what "server time" means to the people reading it)."""
+    tz = ZoneInfo("Europe/Paris") if (home_guild(conn) or {}).get("region", "eu").lower() == "eu" else UTC
+    _, _, tf, tp = _scope(team)
+    since = int((datetime.now(UTC) - timedelta(days=30 * months)).timestamp() * 1000)
+    rows = _rows(
+        conn,
+        f"""SELECT pull_date, MIN(start_time) AS first_ms, MAX(end_time) AS last_ms, COUNT(*) AS pulls
+            FROM v_pulls WHERE start_time >= ?{tf} GROUP BY pull_date ORDER BY pull_date""",
+        (since, *tp),
+    )
+    nights: dict[int, list[dict]] = {}
+    for r in rows:
+        start = datetime.fromtimestamp(r["first_ms"] / 1000, tz)
+        end = datetime.fromtimestamp(r["last_ms"] / 1000, tz)
+        if (r["pulls"] or 0) < 3:
+            continue   # a stray one-pull log is not a raid night
+        nights.setdefault(start.weekday(), []).append({"start": start, "end": end})
+    days = []
+    for wd, entries in sorted(nights.items(), key=lambda kv: -len(kv[1])):
+        if len(entries) < max(2, len(rows) // 20):
+            continue   # an occasional extra night is not the schedule
+        starts = sorted(e["start"].hour * 60 + e["start"].minute for e in entries)
+        ends = sorted(e["end"].hour * 60 + e["end"].minute for e in entries)
+        mid = lambda xs: xs[len(xs) // 2]  # noqa: E731
+        days.append({
+            "weekday": wd, "day": WEEKDAYS[wd], "short": WEEKDAYS[wd][:3], "nights": len(entries),
+            "start": f"{mid(starts) // 60:02d}:{mid(starts) % 60:02d}",
+            "end": f"{mid(ends) // 60:02d}:{mid(ends) % 60:02d}",
+        })
+    days.sort(key=lambda d: d["weekday"])
+    hours = None
+    if days:
+        span = sum((int(d["end"][:2]) * 60 + int(d["end"][3:])) - (int(d["start"][:2]) * 60 + int(d["start"][3:])) for d in days)
+        hours = round(span / 60.0, 1)
+    return {
+        "days": days,
+        "nights_per_week": len(days),
+        "hours_per_week": hours,
+        "summary": (", ".join(d["short"] for d in days) + " · " + days[0]["start"] + "–" + days[0]["end"] + " server time") if days else None,
+        "sample_nights": sum(len(v) for v in nights.values()),
+        "months": months,
     }
 
 

@@ -181,17 +181,20 @@ def _progress_line(p: dict[str, Any]) -> str:
 
 
 def _mplus_line(p: dict[str, Any]) -> str:
+    """Only ever speaks when there is a score to speak about.
+
+    A missing score means Raider.IO had nothing for us, not that the player does not run keys - saying otherwise
+    libelled half the roster once already."""
     score, best = p.get("mplus_score"), (p.get("mplus_best") or [])
     if not score:
-        return _pick([
-            "Does not do Mythic+, and treats the subject the way one treats an unpaid parking fine.",
-            "Has no Mythic+ score, a decision they describe as 'lifestyle' and everyone else describes as 'avoidance'.",
-        ], p["player"], "mplus")
-    top = best[0] if best else None
+        return ""
+    top = max(best, key=lambda r: (r.get("level") or 0)) if best else None
     if top and top.get("level"):
         return _pick([
             f"Mythic+ score of {round(score)}, topping out at a +{top['level']} {top['dungeon']} that is still discussed.",
             f"{round(score)} Mythic+ score and a +{top['level']} {top['dungeon']} best, achieved with only mild shouting.",
+            f"Runs keys properly: {round(score)} score, best a +{top['level']} in {top['dungeon']}.",
+            f"+{top['level']} {top['dungeon']} and a {round(score)} Mythic+ score, in case the raid logs were not enough.",
         ], p["player"], "mplus")
     return f"Mythic+ score of {round(score)}, earned quietly and mentioned constantly."
 

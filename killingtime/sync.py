@@ -480,6 +480,10 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
 
 
 CHARACTER_FIELDS = "gear,guild,mythic_plus_scores_by_season:current,mythic_plus_best_runs,raid_progression"
+# Bump this whenever CHARACTER_FIELDS changes. Rows stored under an older version are refetched even when they are
+# still "fresh": otherwise a profile cached before a field existed keeps a null for that field for ever, which is how
+# a roster full of Mythic+ runners ended up looking like people who had never touched a key.
+PROFILE_VERSION = 2
 
 
 def sync_characters(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Settings, zone_id: int | None,
@@ -520,12 +524,15 @@ def sync_characters(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Set
         alt_realm.setdefault(r["player_name"], slugify(r["server"]))
     fresh_after = now_ms() - max_age_days * 86_400_000
     known = {
-        r["name"]: r for r in _rows_sync(conn, "SELECT name, fetched_at, missing FROM characters WHERE region = ?", (home.region,))
+        r["name"]: r for r in _rows_sync(
+            conn, "SELECT name, fetched_at, missing, profile_version FROM characters WHERE region = ?", (home.region,))
     }
     todo = [
         n for n in wanted
         if n not in known
         or (known[n]["fetched_at"] < fresh_after and not known[n]["missing"])
+        # Stored before the current set of fields existed: refetch whatever its age.
+        or (not known[n]["missing"] and (known[n]["profile_version"] or 0) < PROFILE_VERSION)
         # A character Raider.IO could not find is retried on a full sync, or after a week in case they came back.
         or (known[n]["missing"] and (retry_missing or known[n]["fetched_at"] < now_ms() - 7 * 86_400_000))
     ]
@@ -558,8 +565,9 @@ def sync_characters(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Set
         scores = (seasons[0].get("scores") if seasons else {}) or {}
         best_role = max(("dps", "healer", "tank"), key=lambda r: scores.get(r) or 0) if scores else None
         runs = [
-            {"level": r.get("mythic_level"), "dungeon": r.get("dungeon"), "score": r.get("score")}
-            for r in (prof.get("mythic_plus_best_runs") or [])[:3]
+            {"level": r.get("mythic_level"), "dungeon": r.get("dungeon"), "score": r.get("score"),
+             "upgrades": r.get("num_keystone_upgrades"), "short": r.get("short_name")}
+            for r in (prof.get("mythic_plus_best_runs") or [])[:5]
         ]
         gear = (prof.get("gear") or {}).get("items") or {}
         slim = {
@@ -571,15 +579,15 @@ def sync_characters(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Set
             conn.execute(
                 """INSERT OR REPLACE INTO characters(name, realm_slug, region, class, race, gender, spec, role,
                        item_level, thumbnail_url, portrait_url, profile_url, guild_name, gear, mplus_score, mplus_role,
-                       mplus_best, raid_progression, achievement_points, faction, missing, fetched_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                       mplus_best, raid_progression, achievement_points, faction, missing, profile_version, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
                 (prof.get("name") or name, realm_slug, home.region, prof.get("class"), prof.get("race"),
                  prof.get("gender"), prof.get("active_spec_name"), (prof.get("active_spec_role") or "").lower(),
                  (prof.get("gear") or {}).get("item_level_equipped"), thumb,
                  thumb.replace("-avatar.jpg", "-inset.jpg"), prof.get("profile_url"),
                  (prof.get("guild") or {}).get("name"), json.dumps(slim), scores.get("all"), best_role,
                  json.dumps(runs), json.dumps(prof.get("raid_progression") or {}), prof.get("achievement_points"),
-                 prof.get("faction"), now_ms()),
+                 prof.get("faction"), PROFILE_VERSION, now_ms()),
             )
         found += 1
     stats.characters = found
@@ -915,9 +923,10 @@ def run_sync(
         if configured(settings):
             progress("snapshot uploaded" if persist(settings) else "warning: snapshot upload failed")
             try:
-                from .public import render_public_page, render_public_team_page
+                from .public import render_public_join_page, render_public_page, render_public_team_page
 
-                pages = {"public": render_public_page(conn, settings), "team": render_public_team_page(conn, settings)}
+                pages = {"public": render_public_page(conn, settings), "team": render_public_team_page(conn, settings),
+                         "join": render_public_join_page(conn, settings)}
             except Exception as exc:  # noqa: BLE001 - the public page must never fail the sync
                 stats.warn(f"public site render failed: {exc}", progress)
             else:

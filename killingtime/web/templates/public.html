@@ -1,47 +1,188 @@
 {% extends "public_base.html" %}
+{% block styles %}
+    /* ---- hero -------------------------------------------------------------------------------------- */
+    .lead { position: relative; margin: -1.2rem calc(50% - 50vw) 0; width: 100vw; min-height: min(88vh, 780px);
+            display: flex; align-items: flex-end; overflow: hidden; }
+    .lead .bg { position: absolute; inset: 0; }
+    .lead .bg img, .lead .bg video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .lead .bg::after { content: ""; position: absolute; inset: 0;
+            background: linear-gradient(to top, var(--bg) 2%, rgba(15,14,12,.72) 38%, rgba(15,14,12,.25) 70%, rgba(15,14,12,.6)); }
+    .lead .bg img { animation: drift 26s ease-in-out infinite alternate; }
+    @keyframes drift { from { transform: scale(1.04) translate3d(0,0,0); } to { transform: scale(1.14) translate3d(-1.5%, -1.5%, 0); } }
+    .lead .inner { position: relative; width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 1.25rem 3rem; }
+    .eyebrow { display: inline-flex; align-items: center; gap: .5rem; font-size: .74rem; font-weight: 700; letter-spacing: .16em;
+            text-transform: uppercase; color: var(--gold); border: 1px solid rgba(232,176,74,.35); border-radius: 999px;
+            padding: .3rem .8rem; background: rgba(232,176,74,.08); }
+    .lead h1 { margin: .8rem 0 0; font-size: clamp(2.8rem, 9vw, 6.5rem); line-height: .92; font-weight: 900; letter-spacing: -.035em;
+            text-shadow: 0 6px 40px rgba(0,0,0,.65); }
+    .lead .strap { margin: .7rem 0 0; font-size: clamp(1rem, 2.2vw, 1.35rem); color: var(--ink); max-width: 46ch; text-shadow: 0 2px 18px rgba(0,0,0,.8); }
+    .lead .now { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1.1rem; }
+    .lead .now b { font-size: 1.05rem; }
+    .chip { display: inline-flex; align-items: center; gap: .45rem; border: 1px solid var(--border); border-radius: 10px;
+            padding: .45rem .75rem; background: rgba(20,18,16,.7); font-size: .9rem; color: var(--ink-2); backdrop-filter: blur(6px); }
+    .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(57,192,106,.18); }
+    .lead .cta { margin-top: 1.4rem; }
+    .cta a.big { padding: .85rem 1.5rem; font-size: 1.02rem; }
+    .scroll-cue { position: absolute; left: 50%; bottom: 1rem; transform: translateX(-50%); color: var(--muted); font-size: .72rem;
+            letter-spacing: .18em; text-transform: uppercase; animation: bob 2.4s ease-in-out infinite; }
+    @keyframes bob { 0%,100% { transform: translate(-50%, 0); opacity: .55 } 50% { transform: translate(-50%, 6px); opacity: 1 } }
+
+    /* ---- numbers band ------------------------------------------------------------------------------ */
+    .band { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 1px; background: var(--border);
+            border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin-top: 1.6rem; }
+    .band > div { background: var(--surface-2); padding: 1rem .9rem; }
+    .band .n { font-size: clamp(1.5rem, 3.2vw, 2.1rem); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .band .l { font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-top: .35rem; font-weight: 700; }
+
+    /* ---- section furniture ------------------------------------------------------------------------- */
+    .sec-head { display: flex; align-items: end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 2.6rem 0 1rem; }
+    .sec-head h2 { margin: 0; font-size: clamp(1.4rem, 3vw, 2rem); color: var(--ink); text-transform: none; letter-spacing: -.02em; }
+    .sec-head p { margin: .25rem 0 0; color: var(--muted); font-size: .92rem; }
+    .split { display: grid; grid-template-columns: 1.15fr .85fr; gap: 1.2rem; align-items: stretch; }
+    @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+    .shot { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); min-height: 240px; }
+    .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .shot .over { position: absolute; inset: auto 0 0 0; padding: 1.4rem 1.2rem 1rem;
+            background: linear-gradient(to top, rgba(10,9,8,.92), transparent); }
+    .shot .over h3 { margin: 0 0 .2rem; font-size: 1.2rem; }
+
+    /* ---- portrait marquee -------------------------------------------------------------------------- */
+    .marquee { position: relative; margin: 1rem calc(50% - 50vw) 0; width: 100vw; overflow: hidden;
+            -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+            mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent); }
+    .marquee .track { display: flex; gap: .6rem; width: max-content; animation: slide 90s linear infinite; }
+    .marquee:hover .track { animation-play-state: paused; }
+    .marquee a { flex: none; width: 116px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border);
+            background: var(--surface-2); position: relative; transition: transform .2s ease, border-color .2s ease; }
+    .marquee a:hover { transform: translateY(-6px) scale(1.06); border-color: var(--gold); }
+    .marquee img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; }
+    .marquee span { position: absolute; left: 0; right: 0; bottom: 0; padding: 1rem .45rem .3rem; font-size: .7rem; font-weight: 700;
+            background: linear-gradient(to top, rgba(10,9,8,.95), transparent); }
+    @keyframes slide { from { transform: translateX(0) } to { transform: translateX(-50%) } }
+    @media (prefers-reduced-motion: reduce) { .marquee .track { animation: none } .lead .bg img { animation: none } }
+
+    /* ---- fight reel -------------------------------------------------------------------------------- */
+    .reel { display: grid; grid-template-columns: repeat(6, 1fr); gap: .8rem; }
+    .reel .clip { grid-column: span 2; }
+    .reel .clip.wide { grid-column: span 3; aspect-ratio: 21 / 9; }
+    @media (max-width: 900px) { .reel { grid-template-columns: repeat(2, 1fr); } .reel .clip, .reel .clip.wide { grid-column: span 1; aspect-ratio: 16 / 9; } }
+    @media (max-width: 560px) { .reel { grid-template-columns: 1fr; } }
+    .clip { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); background: #100f0d;
+            aspect-ratio: 16 / 9; cursor: pointer; transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+    .clip:hover { transform: translateY(-4px); border-color: var(--gold); box-shadow: 0 16px 40px rgba(0,0,0,.55); }
+    .clip video, .clip img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+    .clip .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 2rem .9rem .7rem; font-weight: 700; font-size: .95rem;
+            background: linear-gradient(to top, rgba(10,9,8,.92), transparent); pointer-events: none; }
+    .clip .cap small { display: block; font-weight: 500; font-size: .78rem; color: var(--ink-2); }
+
+    /* ---- recruit ----------------------------------------------------------------------------------- */
+    .recruit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+    .need { border: 1px solid var(--border); border-radius: 14px; padding: 1rem 1.1rem; background: var(--surface-2); }
+    .need h4 { margin: 0 0 .3rem; font-size: 1rem; }
+    .need p { margin: 0; color: var(--ink-2); font-size: .9rem; }
+    .sched { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+    .sched .day { border: 1px solid var(--border); border-radius: 10px; padding: .5rem .8rem; background: rgba(255,255,255,.03); }
+    .sched .day b { display: block; font-size: .95rem; }
+    .sched .day small { color: var(--muted); }
+    .kill-list { display: grid; gap: .5rem; }
+    .kill-row { display: flex; align-items: center; gap: .8rem; border: 1px solid var(--border); border-radius: 12px;
+            padding: .6rem .9rem; background: var(--surface-2); }
+    .kill-row .when { color: var(--muted); font-size: .82rem; min-width: 88px; font-variant-numeric: tabular-nums; }
+    .kill-row .boss { font-weight: 700; }
+    .kill-row .meta { margin-left: auto; color: var(--muted); font-size: .82rem; }
+    .final-cta { position: relative; margin-top: 2.5rem; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
+    .final-cta img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .final-cta .body { position: relative; padding: 2.6rem 1.5rem; text-align: center;
+            background: linear-gradient(to top, rgba(10,9,8,.94), rgba(10,9,8,.66)); }
+    .final-cta h2 { color: var(--ink); font-size: clamp(1.5rem, 4vw, 2.4rem); text-transform: none; letter-spacing: -.02em; margin: 0 0 .4rem; }
+    .final-cta p { color: var(--ink-2); margin: 0 auto 1.2rem; max-width: 52ch; }
+    .final-cta .cta { justify-content: center; }
+{% endblock %}
 {% block content %}
-  <section class="hero">
-    <h1>{{ settings.name }}</h1>
-    <div class="kicker"><span>{{ guild.faction|default('', true)|capitalize }}</span> raiding guild · {{ settings.realm }} {{ settings.region }}</div>
-    <p>{{ settings.tagline or (settings.name ~ " is a " ~ (guild.faction|default('', true)) ~ " raiding guild on " ~ settings.realm ~ " (" ~ settings.region ~ ")" ~ (" raiding as " ~ teams|join(" and ") if teams else "") ~ ". Progress below updates automatically from Warcraft Logs and Raider.IO.") }}</p>
-    {% if settings.recruiting %}<div class="recruit">{{ settings.recruiting }}</div>{% endif %}
+  <div class="lead">
+    <div class="bg">
+      <video id="hero-video" autoplay muted loop playsinline poster="/static/site/hero.webp" style="display:none"></video>
+      <img src="/static/site/hero.webp" alt="{{ settings.name }} on the raid floor">
+    </div>
+    <div class="inner">
+      <span class="eyebrow reveal">{{ guild.faction|default('', true)|capitalize }} · {{ settings.realm }} {{ settings.region }}{% if totals.years and totals.years >= 1.5 %} · {{ totals.years|round(0)|int }} years of logs{% endif %}</span>
+      <h1 class="reveal d1">{{ settings.name }}</h1>
+      <p class="strap reveal d2">{{ settings.tagline or "A Horde raiding guild that has been killing bosses on Draenor since " ~ (totals.since[:4] if totals.since else "the start") ~ ". Two teams, one roster, and every pull on the record." }}</p>
+      <div class="now reveal d3">
+        {% if current and current.difficulties %}
+        {% set d = current.difficulties[0] %}
+        <span class="chip"><span class="dot"></span><b>{{ d.killed }}/{{ d.total }} {{ d.name }}</b> · {{ current.name }}</span>
+        {% if d.next_boss %}<span class="chip">Working on <b>{{ d.next_boss }}</b>{% if d.next_best_pct is not none %} · {{ d.next_best_pct }}% best pull{% endif %}</span>{% endif %}
+        {% endif %}
+        {% if current and current.ranks.mythic %}<span class="chip">Realm rank <b>#{{ current.ranks.mythic.realm }}</b></span>
+        {% elif current and current.ranks.heroic %}<span class="chip">Realm rank <b>#{{ current.ranks.heroic.realm }}</b></span>{% endif %}
+        {% if schedule.summary %}<span class="chip">{{ schedule.summary }}</span>{% endif %}
+      </div>
+      <div class="cta reveal d4">
+        <a class="primary big" href="{{ links.apply or '/join' }}"{% if links.apply %} target="_blank" rel="noopener"{% endif %}>Apply to raid with us</a>
+        <a class="big" href="/team">Meet the team</a>
+        {% if links.discord %}<a class="big" href="{{ links.discord }}" target="_blank" rel="noopener">Discord</a>{% endif %}
+      </div>
+    </div>
+    <div class="scroll-cue">scroll</div>
+  </div>
+
+  <section>
+    <div class="band reveal">
+      <div><div class="n" data-count="{{ totals.kills }}">0</div><div class="l">Bosses killed</div></div>
+      <div><div class="n" data-count="{{ totals.pulls }}">0</div><div class="l">Pulls logged</div></div>
+      <div><div class="n" data-count="{{ totals.nights }}">0</div><div class="l">Raid nights</div></div>
+      <div><div class="n" data-count="{{ totals.hours }}">0</div><div class="l">Hours in combat</div></div>
+      <div><div class="n" data-count="{{ totals.raiders }}">0</div><div class="l">Raiders</div></div>
+      <div><div class="n" data-count="{{ totals.tiers }}">0</div><div class="l">Tiers raided</div></div>
+    </div>
   </section>
 
   {% if current %}
   <section>
-    <h2>Current tier</h2>
-    <div class="card big">
-      <div class="tier-head">
-        <h3>{{ current.name }}</h3>
-        <small>{{ current.expansion }} · {{ current.bosses }} bosses · raiding since {{ current.first }}</small>
-      </div>
-      <div class="diffs">
-        {% for d in current.difficulties %}
-        <div class="diff {{ d.name[0]|lower }}">
-          <div class="label"><span>{{ d.name }}</span><span>{{ 'Cleared' if d.cleared else (d.next_boss or '') }}</span></div>
-          <div class="value">{{ d.killed }}<small>/{{ d.total }}</small></div>
-          <div class="bar"><span style="width: {{ (100 * d.killed / d.total) if d.total else 0 }}%"></span></div>
-          <div class="sub">{% if d.cleared %}Cleared {{ d.last_kill_date }}{% elif d.next_boss %}Working on {{ d.next_boss }}{% if d.next_best_pct is not none %} · best pull {{ d.next_best_pct }}%{% endif %}{% endif %}
-            · {{ d.pulls|num }} pulls over {{ d.nights }} nights</div>
+    <div class="sec-head reveal">
+      <div><h2>{{ current.name }}</h2><p>{{ current.expansion }} · {{ current.bosses }} bosses · we have been in here since {{ current.first }}</p></div>
+      {% if links.progress %}<a class="pill" href="{{ links.progress }}" style="padding:.5rem 1rem">Every pull, boss by boss →</a>{% endif %}
+    </div>
+    <div class="split">
+      <div class="card big reveal">
+        <div class="diffs">
+          {% for d in current.difficulties %}
+          <div class="diff {{ d.name[0]|lower }}">
+            <div class="label"><span>{{ d.name }}</span><span>{{ 'Cleared' if d.cleared else (d.next_boss or '') }}</span></div>
+            <div class="value">{{ d.killed }}<small>/{{ d.total }}</small></div>
+            <div class="bar"><span style="width: {{ (100 * d.killed / d.total) if d.total else 0 }}%"></span></div>
+            <div class="sub">{% if d.cleared %}Cleared {{ d.last_kill_date }}{% elif d.next_boss %}Working on {{ d.next_boss }}{% if d.next_best_pct is not none %} · best pull {{ d.next_best_pct }}%{% endif %}{% endif %}
+              · {{ d.pulls|num }} pulls over {{ d.nights }} nights</div>
+          </div>
+          {% endfor %}
         </div>
-        {% endfor %}
+        {% if current.ranks %}
+        <div class="ranks">
+          {% if current.ranks.mythic %}<div class="rank">Mythic <b>#{{ current.ranks.mythic.realm }}</b> realm{% if current.ranks.mythic.world %} · <b>#{{ current.ranks.mythic.world|num }}</b> world{% endif %}</div>{% endif %}
+          {% if current.ranks.heroic %}<div class="rank">Heroic <b>#{{ current.ranks.heroic.realm }}</b> realm{% if current.ranks.heroic.world %} · <b>#{{ current.ranks.heroic.world|num }}</b> world{% endif %}</div>{% endif %}
+          {% if current.ranks.wcl %}<div class="rank">Warcraft Logs <b>#{{ current.ranks.wcl.world|num }}</b> world · <b>#{{ current.ranks.wcl.region|num }}</b> {{ settings.region }}</div>{% endif %}
+        </div>
+        {% endif %}
       </div>
-      {% if current.ranks %}
-      <div class="ranks">
-        {% if current.ranks.mythic %}<div class="rank">Mythic rank <b>#{{ current.ranks.mythic.realm }}</b> realm{% if current.ranks.mythic.world %} · <b>#{{ current.ranks.mythic.world|num }}</b> world{% endif %}</div>{% endif %}
-        {% if current.ranks.heroic %}<div class="rank">Heroic rank <b>#{{ current.ranks.heroic.realm }}</b> realm{% if current.ranks.heroic.world %} · <b>#{{ current.ranks.heroic.world|num }}</b> world{% endif %}</div>{% endif %}
-        {% if current.ranks.wcl %}<div class="rank">Warcraft Logs progress <b>#{{ current.ranks.wcl.world|num }}</b> world · <b>#{{ current.ranks.wcl.region|num }}</b> {{ settings.region }}</div>{% endif %}
+      <div class="shot reveal d2">
+        <img src="/static/site/kill.webp" alt="A boss goes down" loading="lazy">
+        <div class="over">
+          {% if latest_kills %}<h3>{{ latest_kills[0].boss }} is down</h3>
+          <p class="muted" style="margin:0">{{ latest_kills[0].difficulty_name }} · {{ latest_kills[0].date }}{% if latest_kills[0].pulls %} · {{ latest_kills[0].pulls }} pulls{% endif %}</p>
+          {% else %}<h3>{{ current.name }}</h3><p class="muted" style="margin:0">Progress updates itself after every raid.</p>{% endif %}
+        </div>
       </div>
-      {% endif %}
     </div>
   </section>
+  {% endif %}
 
-  {% if current.teams %}
+  {% if current and current.teams %}
   <section>
-    <h2>Raid teams</h2>
+    <div class="sec-head reveal"><div><h2>Two teams, one guild</h2><p>Pick your night. Both teams raid the same tier, at their own pace.</p></div></div>
     <div class="teams">
       {% for t in current.teams %}
-      <div class="card team">
+      <div class="card team reveal d{{ loop.index }}">
         <h3>{{ t.team }} <span class="tag">{{ current.name }}</span></h3>
         {% for d in t.difficulties %}
         <div class="row"><span><span class="pill {{ d.name[0]|lower }}">{{ d.name }}</span></span>
@@ -50,57 +191,100 @@
         {% else %}
         <p class="muted">No logged pulls in this tier yet.</p>
         {% endfor %}
-        {% if t.latest_kills %}<p class="muted" style="margin:.6rem 0 0">Latest: {% for k in t.latest_kills[:3] %}{{ k.boss }} ({{ k.difficulty_name[0] }}, {{ k.date }}){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
       </div>
       {% endfor %}
     </div>
   </section>
   {% endif %}
+
+  <section>
+    <div class="sec-head reveal"><div><h2>What a raid night looks like</h2>
+      <p>The pull, the charge, the heal that holds it together, the wipe, and the bit that makes it worth it.</p></div></div>
+    <div class="reel">
+      {% for c in clips %}
+      <div class="clip reveal{{ ' wide' if c.wide }}{{ ' d' ~ (loop.index0 % 4) if loop.index0 % 4 }}" data-src="/static/site/{{ c.file }}.mp4">
+        <img src="/static/site/{{ c.file }}.webp" alt="{{ c.title }}" loading="lazy">
+        <div class="cap">{{ c.title }}<small>{{ c.sub }}</small></div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if portrait_strip %}
+  <section>
+    <div class="sec-head reveal">
+      <div><h2>The people who show up</h2><p>{{ portrait_strip|length }} raiders, drawn in the transmog they are wearing right now.</p></div>
+      <a class="pill" href="/team" style="padding:.5rem 1rem">Meet the team →</a>
+    </div>
+    <div class="marquee reveal">
+      <div class="track">
+        {% for m in portrait_strip + portrait_strip %}
+        <a href="/team" title="{{ m.player }} · {{ m.spec }} {{ m.class }}"><img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"><span>{{ m.player }}</span></a>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
   {% endif %}
 
   <section>
-    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
-      <div>
-        <h3 style="margin:0 0 .2rem;font-size:1.2rem">Meet the team</h3>
-        <p class="muted" style="margin:0">Who actually raids: bios from their own attendance and parses, and a portrait
-          of each of them in the transmog they are wearing right now.</p>
+    <div class="sec-head reveal"><div><h2>Raid with us</h2><p>What the guild looks like from the inside, and how to get in.</p></div>
+      <a class="pill" href="/join" style="padding:.5rem 1rem">The full pitch →</a></div>
+    <div class="recruit-grid">
+      <div class="need reveal">
+        <h4>When we raid</h4>
+        {% if schedule.days %}
+        <div class="sched">{% for d in schedule.days %}<div class="day"><b>{{ d.short }}</b><small>{{ d.start }}–{{ d.end }}</small></div>{% endfor %}</div>
+        <p style="margin-top:.6rem">{{ schedule.nights_per_week }} nights a week{% if schedule.hours_per_week %}, about {{ schedule.hours_per_week }} hours{% endif %} — measured from our own logs, not from a promise.</p>
+        {% else %}<p>{{ settings.raid_times or "Ask us on Discord." }}</p>{% endif %}
       </div>
-      <a class="pill" href="/team" style="padding:.5rem 1rem;font-size:.9rem">See the roster →</a>
+      <div class="need reveal d1">
+        <h4>Who we are short of</h4>
+        <p>{{ settings.recruiting or "Always happy to hear from strong players on any class. Tell us what you play and we will find the night that fits." }}</p>
+        <div class="sched">{% for c in recruiting.composition %}<div class="day"><b>{{ c.count }}</b><small>{{ c.label }}</small></div>{% endfor %}</div>
+      </div>
+      <div class="need reveal d2">
+        <h4>What you get</h4>
+        <p>A roster that turns up, logs that are public, and officers who can tell you exactly how many pulls a boss took
+          and where you sat on the meter. No drama, no mandatory alt runs.</p>
+      </div>
+      <div class="need reveal d3">
+        <h4>What we ask</h4>
+        <p>Turn up, know the fight, take the feedback. {% if schedule.days %}{{ schedule.nights_per_week }} nights a week{% else %}Raid nights{% endif %},
+          consumables sorted, and a willingness to wipe {{ (current.difficulties[0].pulls // 10 * 10) if current and current.difficulties else 'a few hundred' }} times and come back the next week.</p>
+      </div>
     </div>
   </section>
 
   {% if latest_kills %}
   <section>
-    <h2>Latest kills</h2>
-    <div class="card scroll">
-      <table>
-        <thead><tr><th>Date</th><th>Boss</th><th>Raid</th><th>Difficulty</th>{% if teams %}<th>Team</th>{% endif %}<th class="num">Pulls</th><th class="num">Nights</th></tr></thead>
-        <tbody>
-        {% for k in latest_kills %}
-        <tr><td>{{ k.date }}</td><td><b>{{ k.boss }}</b></td><td class="muted">{{ k.zone_name }}</td><td><span class="pill {{ k.difficulty_name[0]|lower }}">{{ k.difficulty_name }}</span></td>{% if teams %}<td>{{ k.team or '—' }}</td>{% endif %}<td class="num">{{ k.pulls }}</td><td class="num">{{ k.nights }}</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
+    <div class="sec-head reveal"><div><h2>Recently killed</h2><p>Straight from Warcraft Logs, updated after every raid.</p></div></div>
+    <div class="kill-list">
+      {% for k in latest_kills[:8] %}
+      <div class="kill-row reveal{{ ' d' ~ (loop.index0 % 5) if loop.index0 % 5 }}">
+        <span class="when">{{ k.date }}</span>
+        <span class="pill {{ k.difficulty_name[0]|lower }}">{{ k.difficulty_name[0] }}</span>
+        <span class="boss">{{ k.boss }}</span>
+        <span class="muted">{{ k.zone_name }}</span>
+        <span class="meta">{% if k.pulls %}{{ k.pulls }} pulls{% endif %}{% if k.team %} · {{ k.team }}{% endif %}</span>
+      </div>
+      {% endfor %}
     </div>
   </section>
   {% endif %}
 
   {% if history %}
   <section>
-    <h2>Recent tiers</h2>
-    <div class="card scroll">
+    <div class="sec-head reveal"><div><h2>Where we have been</h2><p>Every tier we have logs for, and what we did with it.</p></div></div>
+    <div class="card scroll reveal">
       <table>
-        <thead><tr><th>Raid</th><th>Expansion</th><th>Mythic</th><th>Heroic</th><th>Normal</th><th class="num">Mythic rank</th><th class="num">Heroic rank</th><th>Raided</th></tr></thead>
+        <thead><tr><th>Raid</th><th>Expansion</th><th>Mythic</th><th>Heroic</th><th>Normal</th><th class="num">Mythic rank</th><th>Raided</th></tr></thead>
         <tbody>
         {% for t in history %}
         {% set byd = {} %}{% for d in t.difficulties %}{% set _ = byd.update({d.difficulty: d}) %}{% endfor %}
         <tr><td><b>{{ t.name }}</b></td><td class="muted">{{ t.expansion or '' }}</td>
           {% for code in (5, 4, 3) %}<td>{% if byd[code] %}<span class="pill {{ DIFFICULTIES[code][0]|lower }}">{{ byd[code].killed }}/{{ byd[code].total }}</span>
-            {%- if byd[code].tier_over and byd[code].achievement_earned %} <span class="pill ce" title="{{ byd[code].achievement }}">{{ 'CE' if code == 5 else 'AOTC' }}</span>{% endif %}
-            {%- if byd[code].post_season %} <span class="muted" title="{{ byd[code].post_season }} boss(es) killed after the season ended, so no {{ byd[code].achievement }}">+{{ byd[code].post_season }} post</span>{% endif %}
-            {%- if byd[code].cleared %} <span class="muted">{{ byd[code].last_kill_date }}</span>{% endif %}{% else %}—{% endif %}</td>{% endfor %}
-          <td class="num">{% if t.ranks.mythic %}#{{ t.ranks.mythic.realm }} realm{% if t.ranks.mythic.world %} · #{{ t.ranks.mythic.world|num }} world{% endif %}{% elif t.ranks.wcl %}#{{ t.ranks.wcl.world|num }} world (WCL){% else %}—{% endif %}</td>
-          <td class="num">{% if t.ranks.heroic %}#{{ t.ranks.heroic.realm }} realm{% if t.ranks.heroic.world %} · #{{ t.ranks.heroic.world|num }} world{% endif %}{% else %}—{% endif %}</td>
+            {%- if byd[code].tier_over and byd[code].achievement_earned %} <span class="pill ce">{{ 'CE' if code == 5 else 'AOTC' }}</span>{% endif %}{% else %}—{% endif %}</td>{% endfor %}
+          <td class="num">{% if t.ranks.mythic %}#{{ t.ranks.mythic.realm }} realm{% elif t.ranks.wcl %}#{{ t.ranks.wcl.world|num }} world{% else %}—{% endif %}</td>
           <td class="muted">{{ t.first }} → {{ t.last }}</td></tr>
         {% endfor %}
         </tbody>
@@ -108,5 +292,66 @@
     </div>
   </section>
   {% endif %}
+{% endblock %}
+{% block outro %}
+  <section>
+    <div class="final-cta reveal">
+      <img src="/static/site/join.webp" alt="" loading="lazy">
+      <div class="body">
+        <h2>There is a spot on the roster</h2>
+        <p>{{ settings.about or "If you want a raid team that shows up, logs everything and still finds it funny, come and talk to us." }}</p>
+        <div class="cta">
+          {% if links.apply %}<a class="primary big" href="{{ links.apply }}" target="_blank" rel="noopener">Apply now</a>
+          {% else %}<a class="primary big" href="/join">How to join</a>{% endif %}
+          {% if links.discord %}<a class="big" href="{{ links.discord }}" target="_blank" rel="noopener">Join our Discord</a>{% endif %}
+          <a class="big" href="{{ links.raiderio }}" target="_blank" rel="noopener">Raider.IO</a>
+          <a class="big" href="{{ links.warcraftlogs }}" target="_blank" rel="noopener">Warcraft Logs</a>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+{% block scripts %}
+<script>
+// The hero still is the poster; the video only joins in once it can play, and never on a metered connection.
+(function () {
+  const v = document.getElementById("hero-video"), img = document.querySelector(".lead .bg img");
+  if (!v || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const c = navigator.connection || {};
+  if (c.saveData || /2g/.test(c.effectiveType || "")) return;
+  v.src = "/static/site/hero.mp4";
+  v.addEventListener("canplay", () => { v.style.display = "block"; if (img) img.style.display = "none"; }, { once: true });
+  v.addEventListener("error", () => v.remove(), { once: true });
+})();
 
+// The reel: each tile is a poster until it scrolls into view, then it quietly plays its own clip on a loop.
+(function () {
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const c = navigator.connection || {};
+  const cheap = c.saveData || /2g/.test(c.effectiveType || "");
+  const tiles = [...document.querySelectorAll(".clip[data-src]")];
+  if (!tiles.length) return;
+  const attach = (tile) => {
+    if (tile.dataset.loaded) return tile.querySelector("video");
+    tile.dataset.loaded = "1";
+    const v = document.createElement("video");
+    v.muted = true; v.loop = true; v.playsInline = true; v.preload = "none";
+    v.src = tile.dataset.src;
+    v.addEventListener("error", () => v.remove(), { once: true });
+    tile.appendChild(v);
+    return v;
+  };
+  tiles.forEach((tile) => {
+    tile.addEventListener("mouseenter", () => { const v = attach(tile); if (v) v.play().catch(() => {}); });
+    tile.addEventListener("click", () => { const v = attach(tile); if (v) v.play().catch(() => {}); });
+  });
+  if (reduced || cheap || !window.IntersectionObserver) return;
+  const io = new IntersectionObserver((es) => es.forEach((e) => {
+    const v = e.isIntersecting ? attach(e.target) : e.target.querySelector("video");
+    if (!v) return;
+    if (e.isIntersecting) v.play().catch(() => {}); else v.pause();
+  }), { threshold: 0.35 });
+  tiles.forEach((t) => io.observe(t));
+})();
+</script>
 {% endblock %}

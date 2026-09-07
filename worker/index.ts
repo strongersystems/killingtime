@@ -45,7 +45,7 @@ const CHUNK = 1024 * 1024;
 const PROTECTED = ["/ask", "/api/ask", "/sync", "/api/sync", "/status"];
 const SECRET_HEADER = "X-KT-Secret";
 const MIME: Record<string, string> = {
-  webp: "image/webp", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  webp: "image/webp", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", mp4: "video/mp4",
   svg: "image/svg+xml", css: "text/css; charset=utf-8", js: "text/javascript; charset=utf-8",
 };
 
@@ -226,6 +226,9 @@ async function servePublicSite(request: Request, env: Env, url: URL): Promise<Re
     "/team": { name: "team", live: "/public/team" },
     "/team/": { name: "team", live: "/public/team" },
     "/meet": { name: "team", live: "/public/team" },
+    "/join": { name: "join", live: "/public/join" },
+    "/join/": { name: "join", live: "/public/join" },
+    "/recruit": { name: "join", live: "/public/join" },
   };
   const page = PAGES[url.pathname];
   if (!page) {

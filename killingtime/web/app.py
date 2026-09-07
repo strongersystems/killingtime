@@ -427,6 +427,14 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
         with db_lock:
             return HTMLResponse(render_public_page(conn, settings))
 
+    @app.get("/public/join", response_class=HTMLResponse)
+    def public_join_page():
+        """The recruitment page as the public site shows it (killingtime.fyi/join)."""
+        from ..public import render_public_join_page
+
+        with db_lock:
+            return HTMLResponse(render_public_join_page(conn, settings))
+
     @app.get("/public/team", response_class=HTMLResponse)
     def public_team_page():
         """Meet the Team as the public site shows it (killingtime.fyi/team)."""

@@ -135,8 +135,9 @@ def test_public_site(synced, tmp_path):
     assert data["links"]["raiderio"].endswith("/eu/draenor/Killing%20Time") and data["links"]["warcraftlogs"].endswith("/637454")
     html = render_public_page(conn, settings)
     for needle in ("Killing Time", "The Venomous Abyss", "CE Team", "6 Hour Team", "Recruiting healers", "forms.example/apply",
-                   "Nek'zali the Soulcoiler", "Manaforge Omega", "Latest kills"):
+                   "Nek'zali the Soulcoiler", "Manaforge Omega", "Recently killed", "Bosses killed", "Raid with us"):
         assert needle in html.replace("&#39;", "'"), needle
+    assert data["schedule"]["days"] is not None and "totals" in data and "recruiting" in data
     # publishing PUTs the page to the Worker
     seen = {}
 
@@ -444,3 +445,21 @@ def test_public_team_page(synced):
     page = client.get("/public/team")
     assert page.status_code == 200 and "Meet the team" in page.text
     assert '/team' in client.get("/public").text  # the front page links to it
+
+
+def test_raid_schedule_and_join_page(synced):
+    """The landing page works out when we raid from the logs, rather than from a settings string."""
+    from killingtime.public import render_public_join_page
+
+    conn, *_, settings = synced
+    sched = metrics.raid_schedule(conn, months=24)
+    assert sched["days"], "the fixture raids on fixed weekdays, so a schedule must fall out of it"
+    for d in sched["days"]:
+        assert d["day"] in metrics.WEEKDAYS and len(d["start"]) == 5 and len(d["end"]) == 5
+        assert d["nights"] >= 2
+    assert sched["nights_per_week"] == len(sched["days"]) and sched["summary"]
+
+    html = render_public_join_page(conn, settings)
+    assert "Killing Time" in html and "How to apply" in html and "Come and raid" in html
+    client = TestClient(create_app(settings, conn))
+    assert client.get("/public/join").status_code == 200

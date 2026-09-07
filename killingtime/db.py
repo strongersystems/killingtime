@@ -240,6 +240,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("characters", "raid_progression", "TEXT"),
     ("characters", "achievement_points", "INTEGER"),
     ("characters", "faction", "TEXT"),
+    ("characters", "profile_version", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 VIEWS = """

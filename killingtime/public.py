@@ -100,6 +100,11 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
         }
 
     current = tier_block(raid_tiers[0]) if raid_tiers else None
+    schedule = metrics.raid_schedule(conn)
+    strip = [
+        {"player": m["player"], "slug": m["slug"], "portrait": m["portrait"], "spec": m["spec"], "class": m["class"]}
+        for g in roster_cards(conn, settings) for m in g["members"] if m["generated"]
+    ]
     history = [tier_block(t) for t in raid_tiers[1:6]]
     return {
         "guild": ov["guild"],
@@ -110,6 +115,11 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
         },
         "links": guild_links(conn, settings),
         "teams": teams,
+        "schedule": schedule,
+        "clips": site_clips(),
+        "portrait_strip": strip,
+        "recruiting": recruiting_block(conn, settings, current, schedule, strip),
+        "totals": guild_totals(conn),
         "current": current,
         "history": history,
         "latest_kills": metrics.latest_kills(conn, limit=12),
@@ -118,6 +128,73 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
         "last_sync_ms": ov["last_sync_ms"],
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         "version": __version__,
+    }
+
+
+# The fight reel on the landing page. Each entry needs <file>.webp (the poster) and, ideally, <file>.mp4 next to it
+# in static/site; a clip with no video simply stays a still, so half a set never breaks the page.
+CLIPS = [
+    {"file": "pull", "title": "The pull", "sub": "Weapons up, everyone quiet, someone still eating.", "wide": True},
+    {"file": "kill", "title": "The kill", "sub": "Why anyone does this at all.", "wide": True},
+    {"file": "charge", "title": "The charge", "sub": "Twelve seconds of bravery, then the mechanics start."},
+    {"file": "heal", "title": "The save", "sub": "Nobody thanks the healers. The healers remember."},
+    {"file": "wipe", "title": "The wipe", "sub": "Pull 143. Back in, and again."},
+]
+
+
+def site_clips() -> list[dict[str, Any]]:
+    """Only offer a clip whose poster actually exists on disk."""
+    static = Path(__file__).parent / "web" / "static" / "site"
+    return [c for c in CLIPS if (static / f"{c['file']}.webp").exists()]
+
+
+def guild_totals(conn: sqlite3.Connection) -> dict[str, Any]:
+    """The headline numbers for the landing page, all of them from our own logs."""
+    row = conn.execute(
+        """SELECT COUNT(*) AS pulls, COUNT(DISTINCT pull_date) AS nights, SUM(kill) AS kills,
+                  SUM(duration_s) / 3600.0 AS hours, MIN(start_time) AS since_ms
+           FROM v_pulls"""
+    ).fetchone()
+    raiders = conn.execute("SELECT COUNT(DISTINCT player_name) AS n FROM v_attendance WHERE presence = 1").fetchone()
+    tiers = conn.execute(
+        "SELECT COUNT(*) AS n FROM zones z WHERE EXISTS (SELECT 1 FROM reports r WHERE r.zone_id = z.id)").fetchone()
+    since = metrics.ms_to_date(row["since_ms"]) if row and row["since_ms"] else None
+    years = None
+    if row and row["since_ms"]:
+        years = round((datetime.now(UTC).timestamp() * 1000 - row["since_ms"]) / (365.25 * 24 * 3600 * 1000), 1)
+    return {
+        "pulls": row["pulls"] if row else 0,
+        "nights": row["nights"] if row else 0,
+        "kills": row["kills"] if row else 0,
+        "hours": round(row["hours"] or 0) if row else 0,
+        "raiders": raiders["n"] if raiders else 0,
+        "tiers": tiers["n"] if tiers else 0,
+        "since": since,
+        "years": years,
+    }
+
+
+ROLE_LABELS = {"tanks": "Tanks", "healers": "Healers", "dps": "DPS"}
+
+
+def recruiting_block(conn: sqlite3.Connection, settings: Settings, current: dict | None,
+                     schedule: dict, strip: list[dict]) -> dict[str, Any]:
+    """What a prospective raider needs to know, assembled from the logs where we can and settings where we cannot."""
+    comp = {"tanks": 0, "healers": 0, "dps": 0}
+    for g in roster_cards(conn, settings):
+        for m in g["members"]:
+            if m.get("role") in comp:
+                comp[m["role"]] += 1
+    return {
+        "open": settings.site_recruiting,          # free text: "Recruiting: 1 healer, ranged DPS"
+        "apply_url": settings.site_apply_url,
+        "discord_url": settings.site_discord_url,
+        "schedule": schedule,
+        "clips": site_clips(),
+        "composition": [{"role": k, "label": ROLE_LABELS[k], "count": v} for k, v in comp.items()],
+        "tier": current["name"] if current else None,
+        "progress": (current["difficulties"][0] if current and current["difficulties"] else None),
+        "portraits": strip[:12],
     }
 
 
@@ -189,6 +266,12 @@ def roster_cards(conn: sqlite3.Connection, settings: Settings) -> list[dict[str,
 def render_public_page(conn: sqlite3.Connection, settings: Settings) -> str:
     data = public_summary(conn, settings)
     return _env.get_template("public.html").render(page="home", **data)
+
+
+def render_public_join_page(conn: sqlite3.Connection, settings: Settings) -> str:
+    """The recruitment page (killingtime.fyi/join)."""
+    data = public_summary(conn, settings)
+    return _env.get_template("public_join.html").render(page="join", **data)
 
 
 def render_public_team_page(conn: sqlite3.Connection, settings: Settings) -> str:
