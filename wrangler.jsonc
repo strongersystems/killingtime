@@ -26,5 +26,6 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["KTContainer"] }],
   "triggers": { "crons": ["15 */2 * * *"] },
-  "workers_dev": true
+  "workers_dev": true,
+  "routes": [{ "pattern": "progress.killingtime.fyi", "custom_domain": true }]
 }

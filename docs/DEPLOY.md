@@ -26,9 +26,9 @@ npx wrangler secret put WCL_CLIENT_SECRET
 npx wrangler deploy                          # builds the image, pushes it, creates the container app
 ```
 
-Then attach the domain: Workers & Pages → killingtime-progress → Settings → Domains & Routes → add
-`progress.killingtime.fyi` (or `PUT /accounts/{id}/workers/domains` via the API). Update `PUBLIC_URL` in
-`wrangler.jsonc` if you pick a different hostname - the container uses it to reach the snapshot endpoint.
+The deploy also attaches the custom domain `progress.killingtime.fyi` (the `routes` entry in `wrangler.jsonc`;
+the zone must be on the same account and the token needs the DNS permissions above). To use a different hostname,
+change both the `routes` pattern and `PUBLIC_URL` - the container uses `PUBLIC_URL` to reach the snapshot endpoint.
 
 On first boot the container auto-syncs (Raider.IO immediately; Warcraft Logs once the WCL secrets exist), uploads a
 snapshot, and the cron keeps it fresh. Rough cost: the `basic` instance only runs while requests or the cron keep it
