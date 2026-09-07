@@ -3,38 +3,59 @@
 {% block description %}The raiders of {{ settings.name }} on {{ settings.realm }} {{ settings.region }}: who they are, what they play, and what the logs say about them.{% endblock %}
 {% block canonical %}/team{% endblock %}
 {% block styles %}
-    .roster { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-    .member { display: flex; flex-direction: column; gap: .75rem; }
-    .member-head { display: flex; gap: .9rem; align-items: flex-start; }
-    .shot { position: relative; width: 116px; aspect-ratio: 3 / 4; flex: none; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-2); }
-    .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
-    .shot.render img { object-position: center 12%; }   /* Blizzard busts are framed tighter than the drawn art */
-    .shot.playable { cursor: pointer; }
-    .shot.playable:hover { border-color: var(--gold); }
-    .shot .initial { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: 2.2rem; font-weight: 800; color: var(--muted); }
-    .shot.empty .initial, .shot:not(:has(img)) .initial { display: flex; }
-    .shot .play { position: absolute; right: .25rem; bottom: .25rem; font-size: .6rem; line-height: 1.6; padding: 0 .4rem; border: 0; border-radius: 999px; background: rgba(232,176,74,.9); color: #1a1408; cursor: pointer; font-family: inherit; font-weight: 700; }
-    .member h3 { margin: 0; font-size: 1.15rem; }
-    .member .who { min-width: 0; }
-    .member .sub { color: var(--muted); font-size: .85rem; }
-    .tags { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .45rem; }
-    .member .bio p { margin: 0 0 .4rem; font-size: .9rem; color: var(--ink-2); }
-    .member .bio p:last-child { margin-bottom: 0; }
-    .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: .5rem .6rem; border-top: 1px solid var(--border); padding-top: .6rem; margin-top: auto; }
-    .numbers .label { display: block; font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-    .numbers b { font-size: 1rem; }
-    .kit { font-size: .82rem; color: var(--muted); margin: 0; }
+    .roster { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+    .tile { position: relative; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface-2);
+            cursor: pointer; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+    .tile:hover, .tile:focus-visible { transform: scale(1.28); z-index: 5; border-color: var(--gold);
+            box-shadow: 0 18px 40px rgba(0,0,0,.6); outline: none; }
+    .roster { --edge: 0; }
+    .tile .art { position: relative; aspect-ratio: 3 / 4; background: #12110f; }
+    .tile .art img { width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block; }
+    .tile .art .initial { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+            font-size: 2.4rem; font-weight: 800; color: var(--muted); }
+    .tile.empty .art .initial { display: flex; }
+    .tile .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 1.6rem .5rem .4rem;
+            background: linear-gradient(to top, rgba(10,9,8,.95) 35%, transparent);
+            font-weight: 700; font-size: .82rem; line-height: 1.25; }
+    .tile .cap small { display: block; font-weight: 600; font-size: .65rem; color: var(--ink-2); text-transform: none; letter-spacing: 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tile .mark { position: absolute; top: .3rem; right: .35rem; font-size: .58rem; font-weight: 700; padding: .05rem .4rem;
+            border-radius: 999px; background: rgba(10,9,8,.7); color: var(--ink-2); }
+    .tile .mark.tank { color: #7fb2ff; } .tile .mark.healer { color: #6fdd8b; }
     .group-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin: 1.6rem 0 .8rem; }
     .group-head h2 { margin: 0; color: var(--ink); font-size: 1.25rem; text-transform: none; letter-spacing: 0; }
+
+    /* Tap or click: the full card, with the picture as big as the screen allows and the loop running. */
+    dialog.member { border: 1px solid var(--border); border-radius: 16px; background: var(--surface-2); color: var(--ink);
+            padding: 0; max-width: 860px; width: calc(100% - 2rem); }
+    dialog.member::backdrop { background: rgba(6,5,4,.82); }
+    dialog.member .inner { display: grid; grid-template-columns: minmax(240px, 360px) 1fr; gap: 1.2rem; padding: 1.2rem; }
+    dialog.member .big { position: relative; aspect-ratio: 3 / 4; border-radius: 12px; overflow: hidden; background: #12110f; }
+    dialog.member .big img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    dialog.member h3 { margin: 0 0 .2rem; font-size: 1.6rem; }
+    dialog.member .sub { color: var(--muted); margin-bottom: .6rem; }
+    dialog.member .bio p { margin: 0 0 .5rem; color: var(--ink-2); font-size: .95rem; }
+    dialog.member .close { position: absolute; top: .6rem; right: .8rem; background: none; border: 0; color: var(--muted);
+            font-size: 1.6rem; cursor: pointer; line-height: 1; }
+    dialog.member .close:hover { color: var(--ink); }
+    dialog.member .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: .5rem .7rem;
+            border-top: 1px solid var(--border); padding-top: .7rem; margin-top: .8rem; }
+    dialog.member .numbers .label { display: block; font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    dialog.member .numbers b { font-size: 1.05rem; }
+    dialog.member .kit { font-size: .82rem; color: var(--muted); margin: .2rem 0 0; }
+    dialog.member .frame-dots { display: flex; gap: .25rem; margin-top: .6rem; }
+    dialog.member .frame-dots i { width: 22px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.18); }
+    dialog.member .frame-dots i.on { background: var(--gold); }
+    @media (max-width: 620px) { dialog.member .inner { grid-template-columns: 1fr; } .tile:hover { transform: none; } }
     .links a.active { border-color: var(--gold); color: var(--ink); }
 {% endblock %}
 {% block content %}
   <section class="hero">
     <h1>Meet the team</h1>
     <div class="kicker">The raiders of <span>{{ settings.name }}</span>{% if current %} · {{ current.name }}{% endif %}</div>
-    <p>Everyone below actually raids. The bios are written from their own attendance and Warcraft Logs parses, so
-      any slander is self-inflicted; the portraits are drawn from the transmog and weapons they are wearing right now.
-      {% if groups|selectattr('members')|map(attribute='members')|map('selectattr', 'generated')|map('list')|map('length')|sum %}Hover or tap a portrait with a ▶ on it to see them move.{% endif %}</p>
+    <p>Everyone below actually raids. Hover a portrait to bring them forward, click or tap one for the full picture,
+      the bio and the numbers. The bios are written from their own attendance and Warcraft Logs parses, so any
+      slander is self-inflicted, and the armour and weapons are the ones they are wearing right now.</p>
   </section>
 
   {% if not groups %}
@@ -48,71 +69,104 @@
     </div>
     <div class="roster">
       {% for m in g.members %}
-      <div class="card member">
-        <div class="member-head">
-          <div class="shot{{ ' playable' if m.frames|length > 1 }}{{ ' render' if not m.generated }}" data-frames='{{ m.frames|tojson }}' tabindex="{{ 0 if m.frames|length > 1 else -1 }}">
-            {% if m.portrait %}<img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"
-                 onerror="this.remove();this.closest('.shot').classList.add('empty');">{% endif %}
-            <span class="initial">{{ m.player[0]|upper }}</span>
-            {% if m.frames|length > 1 %}<button class="play" type="button" aria-label="Play the animation">▶</button>{% endif %}
-          </div>
-          <div class="who">
-            <h3>{% if m.profile_url %}<a href="{{ m.profile_url }}" target="_blank" rel="noopener">{{ m.player }}</a>{% else %}{{ m.player }}{% endif %}</h3>
-            <div class="sub">{{ [m.gender, m.race, m.spec, m.class]|select|join(' ') }}</div>
-            <div class="tags">
-              {% if m.role %}<span class="pill">{{ {'tanks': 'Tank', 'healers': 'Healer', 'dps': 'DPS'}.get(m.role, m.role) }}</span>{% endif %}
-              {% if m.item_level %}<span class="pill">{{ m.item_level }} ilvl</span>{% endif %}
-              {% if m.pct is not none %}<span class="pill">{{ m.pct|round(0)|int }}% attendance</span>{% endif %}
-              {% if m.mplus_score %}<span class="pill">{{ m.mplus_score }} M+</span>{% endif %}
-            </div>
-          </div>
+      <div class="tile" tabindex="0" role="button" aria-label="{{ m.player }}" data-member="{{ m.slug }}">
+        <div class="art">
+          {% if m.portrait %}<img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"
+               onerror="this.remove();this.closest('.tile').classList.add('empty');">{% endif %}
+          <span class="initial">{{ m.player[0]|upper }}</span>
         </div>
-
-        <div class="bio">{% for line in m.bio %}<p>{{ line }}</p>{% endfor %}</div>
-
-        {% if m.weapons %}<p class="kit">Carrying {{ m.weapons|join(' and ') }}.</p>{% endif %}
-        {% if m.alts %}<p class="kit">Also plays {{ m.alts|join(', ') }}.</p>{% endif %}
-
-        <div class="numbers">
-          <div><span class="label">Raids this tier</span><b>{{ m.raids }}</b></div>
-          <div><span class="label">Avg parse</span><b>{{ m.avg|round(0)|int if m.avg is not none else '—' }}</b></div>
-          <div><span class="label">Best parse</span><b>{{ m.best|round(0)|int if m.best is not none else '—' }}</b></div>
-          <div><span class="label">Career raids</span><b>{{ m.career_raids }}</b></div>
-          <div><span class="label">Tiers</span><b>{{ m.tiers }}</b></div>
-          {% if m.since %}<div><span class="label">With us since</span><b style="font-size:.85rem">{{ m.since }}</b></div>{% endif %}
-        </div>
+        {% if m.role %}<span class="mark {{ {'tanks': 'tank', 'healers': 'healer', 'dps': 'dps'}.get(m.role, '') }}">{{ {'tanks': 'TANK', 'healers': 'HEAL', 'dps': 'DPS'}.get(m.role, '') }}</span>{% endif %}
+        <div class="cap">{{ m.player }}<small>{{ m.spec }} {{ m.class }}</small></div>
       </div>
       {% endfor %}
     </div>
   </section>
   {% endfor %}
-  {% endif %}
 
+<dialog class="member" id="member-dialog">
+  <button class="close" type="button" aria-label="Close">×</button>
+  <div class="inner">
+    <div>
+      <div class="big"><img alt=""></div>
+      <div class="frame-dots"></div>
+    </div>
+    <div>
+      <h3></h3>
+      <div class="sub"></div>
+      <div class="tags"></div>
+      <div class="bio"></div>
+      <p class="kit weapons"></p>
+      <p class="kit alts"></p>
+      <div class="numbers"></div>
+    </div>
+  </div>
+</dialog>
+
+<script id="roster-data" type="application/json">{{ groups|tojson }}</script>
 <script>
-// Five frames per raider where they exist: hover previews the loop, a click (or the button) locks it on or off.
 (function () {
+  const groups = JSON.parse(document.getElementById("roster-data").textContent);
+  const byslug = {};
+  groups.forEach((g) => g.members.forEach((m) => (byslug[m.slug] = m)));
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document.querySelectorAll(".shot.playable").forEach((shot) => {
-    let frames = [];
-    try { frames = JSON.parse(shot.dataset.frames || "[]"); } catch (e) { return; }
-    if (frames.length < 2) return;
-    const img = shot.querySelector("img"), btn = shot.querySelector(".play");
-    if (!img) return;
-    frames.slice(1).forEach((src) => { const p = new Image(); p.src = src; });   // warm the cache
-    let timer = null, i = 0, locked = false;
-    const show = (n) => { i = (n + frames.length) % frames.length; img.src = frames[i]; };
-    const play = (force) => { if (timer || (reduced && !force)) return; timer = setInterval(() => show(i + 1), 620); };
-    const stop = () => { clearInterval(timer); timer = null; show(0); };
-    shot.addEventListener("mouseenter", () => play());
-    shot.addEventListener("mouseleave", () => { if (!locked) stop(); });
-    shot.addEventListener("click", (e) => {
-      e.preventDefault();
-      locked = !locked;
-      if (locked) play(true); else stop();
-      if (btn) { btn.textContent = locked ? "❚❚" : "▶"; btn.setAttribute("aria-label", locked ? "Stop the animation" : "Play the animation"); }
-    });
-    shot.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); shot.click(); } });
+  const ROLES = { tanks: "Tank", healers: "Healer", dps: "DPS" };
+
+  // Hover: the tile comes forward and, if there is more than one frame, starts flipping through them.
+  document.querySelectorAll(".tile").forEach((tile) => {
+    const m = byslug[tile.dataset.member];
+    const img = tile.querySelector("img");
+    if (!m || !img) return;
+    if (m.frames.length > 1) m.frames.slice(1).forEach((src) => { const p = new Image(); p.src = src; });
+    let timer = null, i = 0;
+    const cycle = () => { i = (i + 1) % m.frames.length; img.src = m.frames[i]; };
+    tile.addEventListener("mouseenter", () => { if (m.frames.length > 1 && !reduced && !timer) timer = setInterval(cycle, 450); });
+    tile.addEventListener("mouseleave", () => { clearInterval(timer); timer = null; i = 0; img.src = m.portrait; });
+    tile.addEventListener("click", () => open(m));
+    tile.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(m); } });
   });
+
+  const dlg = document.getElementById("member-dialog");
+  const big = dlg.querySelector(".big img"), dots = dlg.querySelector(".frame-dots");
+  let dtimer = null, di = 0;
+
+  function open(m) {
+    clearInterval(dtimer);
+    di = 0;
+    big.src = m.portrait || "";
+    big.alt = m.player;
+    dlg.querySelector("h3").textContent = m.player;
+    dlg.querySelector(".sub").textContent = [m.gender, m.race, m.spec, m.class].filter(Boolean).join(" ");
+    dlg.querySelector(".tags").innerHTML = [
+      m.role ? `<span class="pill">${ROLES[m.role] || m.role}</span>` : "",
+      m.item_level ? `<span class="pill">${m.item_level} ilvl</span>` : "",
+      m.pct !== null ? `<span class="pill">${Math.round(m.pct)}% attendance</span>` : "",
+      m.mplus_score ? `<span class="pill">${m.mplus_score} M+</span>` : "",
+    ].join(" ");
+    dlg.querySelector(".bio").innerHTML = m.bio.map((l) => `<p>${esc(l)}</p>`).join("");
+    dlg.querySelector(".weapons").textContent = m.weapons.length ? "Carrying " + m.weapons.join(" and ") + "." : "";
+    dlg.querySelector(".alts").textContent = m.alts.length ? "Also plays " + m.alts.join(", ") + "." : "";
+    dlg.querySelector(".numbers").innerHTML = [
+      ["Raids this tier", m.raids], ["Avg parse", num(m.avg)], ["Best parse", num(m.best)],
+      ["Career raids", m.career_raids], ["Tiers", m.tiers],
+      ["With us since", m.since ? `<span style="font-size:.85rem">${m.since}</span>` : "—"],
+    ].map(([l, v]) => `<div><span class="label">${l}</span><b>${v}</b></div>`).join("");
+    dots.innerHTML = m.frames.length > 1 ? m.frames.map((_, n) => `<i class="${n === 0 ? "on" : ""}"></i>`).join("") : "";
+    if (m.frames.length > 1 && !reduced) {
+      dtimer = setInterval(() => {
+        di = (di + 1) % m.frames.length;
+        big.src = m.frames[di];
+        [...dots.children].forEach((d, n) => d.classList.toggle("on", n === di));
+      }, 500);
+    }
+    dlg.showModal();
+  }
+  function num(v) { return v === null || v === undefined ? "—" : Math.round(v); }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+  dlg.addEventListener("close", () => { clearInterval(dtimer); dtimer = null; });
+  dlg.querySelector(".close").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });   // click the backdrop
 })();
 </script>
+  {% endif %}
 {% endblock %}
