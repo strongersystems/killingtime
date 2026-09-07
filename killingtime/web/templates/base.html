@@ -25,6 +25,7 @@
     <nav class="nav">
       <a href="{{ base }}/{{ '?tier=' ~ zone_id if zone_id }}" class="{{ 'active' if path == base ~ '/' }}">Progress</a>
       <a href="{{ link(base ~ '/roster', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/roster') }}">Roster</a>
+      <a href="{{ link(base ~ '/meet', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/meet') }}">Meet the team</a>
       <a href="{{ link(base ~ '/nights', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/nights') }}">Nights</a>
       <a href="{{ base }}/history" class="{{ 'active' if path.startswith(base ~ '/history') }}">History</a>
       <a href="{{ link(base ~ '/peers', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/peers') }}">Peers</a>

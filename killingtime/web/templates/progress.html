@@ -19,7 +19,7 @@
     <div class="label">{{ summary.difficulty_name }} progress</div>
     <div class="value">{{ summary.killed }}<span class="muted">/{{ summary.total_bosses }}</span></div>
     <div class="progress {{ summary.difficulty_name|lower }}"><span style="width: {{ (100 * summary.killed / summary.total_bosses) if summary.total_bosses else 0 }}%"></span></div>
-    <div class="sub">{% if summary.cleared %}Cleared on {{ summary.last_kill_date }}{% elif summary.next_boss %}Working on <b>{{ summary.next_boss.name }}</b>{% if summary.next_boss.best_pct is not none %} · best pull {{ summary.next_boss.best_pct|round(1) }}% left{% endif %}{% if summary.next_boss.total_pulls %} · {{ summary.next_boss.total_pulls }} pulls so far{% endif %}{% else %}No pulls yet at this difficulty{% endif %}</div>
+    <div class="sub">{% if summary.cleared %}Cleared on {{ summary.last_kill_date }}{% elif summary.next_boss %}Working on <b><a href="{{ link(base ~ '/boss/' ~ summary.next_boss.id, tier=zone_id, d=difficulty) }}">{{ summary.next_boss.name }}</a></b>{% if summary.next_boss.best_pct is not none %} · best pull {{ summary.next_boss.best_pct|round(1) }}% left{% endif %}{% if summary.next_boss.total_pulls %} · {{ summary.next_boss.total_pulls }} pulls so far{% endif %}{% if summary.next_boss.total_pulls %} · <a href="{{ link(base ~ '/boss/' ~ summary.next_boss.id, tier=zone_id, d=difficulty) }}">pull by pull →</a>{% endif %}{% else %}No pulls yet at this difficulty{% endif %}</div>
     {% if summary.tier_over and summary.achievement %}
     <div class="sub achievement">
       {% if summary.achievement_earned %}<span class="pill good">{{ summary.achievement }} ✓</span>{% else %}<span class="pill bad">No {{ summary.achievement }}</span>{% endif %}
@@ -52,7 +52,7 @@
     {% for b in summary.bosses %}
     {% set p = b.peer %}
     <tr class="{{ 'killed' if b.counts else ('post' if b.post_season else ('active' if b.total_pulls)) }}">
-      <td>{{ b.ord }}</td><td><b>{{ b.name }}</b></td>
+      <td>{{ b.ord }}</td><td><b>{% if b.total_pulls %}<a href="{{ link(base ~ '/boss/' ~ b.id, tier=zone_id, d=difficulty) }}" title="Every pull on {{ b.name }}">{{ b.name }}</a>{% else %}{{ b.name }}{% endif %}</b></td>
       <td>{% if b.post_season %}{{ b.kill_date }} <span class="pill bad" title="Killed after the season ended, so it earns no {{ summary.achievement or 'achievement' }} and is not counted as tier progress.">post-season</span>{% elif b.kill_date %}{{ b.kill_date }}{% if b.log_missing %} <span class="pill" title="Raider.IO credits the guild with this kill, but it is not in our Warcraft Logs reports - the night was logged personally or never uploaded.">no log</span>{% endif %}{% elif b.total_pulls %}in progress{% else %}—{% endif %}</td>
       <td class="num">{% if b.counts and b.pulls_to_kill %}{{ b.pulls_to_kill }}{% elif b.counts and b.rio_pulls %}<span title="From Raider.IO: our guild logs hold no pulls from before this kill, so the progression was logged elsewhere.">{{ b.rio_pulls }}*</span>{% elif b.counts %}—{% elif b.total_pulls %}{{ b.total_pulls }}+{% else %}—{% endif %}</td>
       <td class="num">{{ b.nights_to_kill or '—' }}</td>

@@ -838,8 +838,6 @@ def performance(
     conn: sqlite3.Connection, zone_id: int, difficulty: int | None = None, team: str | None = None, include_pugs: bool = False
 ) -> dict[str, Any]:
     """Parse summary for a tier: per player (avg/median/best rank percentile), per boss and per raid night."""
-    home = home_guild(conn)
-    realm = (home["realm_slug"] if home else "").replace("-", " ")
     where = ["zone_id = ?", "difficulty IN (3,4,5)"]
     params: list[Any] = [zone_id]
     if difficulty:
@@ -848,9 +846,11 @@ def performance(
     if team:
         where.append("team = ?")
         params.append(team)
-    if not include_pugs and realm:
-        where.append("(server IS NULL OR LOWER(REPLACE(server, '''', '')) = ?)")
-        params.append(realm.lower())
+    if not include_pugs:
+        # A guild member can play on another realm, so membership is decided by attendance in this
+        # tier, not by the realm printed on the parse.
+        where.append("player_name IN (SELECT player_name FROM v_attendance WHERE zone_id = ?)")
+        params.append(zone_id)
     cutoff = zone_cutoff(conn, zone_id)
     if cutoff:
         where.append("start_time <= ?")
@@ -959,6 +959,195 @@ def roster(conn: sqlite3.Connection, zone_id: int, difficulty: int | None, team:
             rows.append({**p, "raids": 0, "pct": None})
     rows.sort(key=lambda r: (-(r["pct"] or 0), -(r["avg"] or 0), r["player"]))
     return {"players": rows, "total_raids": att["total_raids"], "perf": perf}
+
+
+def _slug(name: str) -> str:
+    import re as _re
+    import unicodedata as _ud
+
+    plain = "".join(c for c in _ud.normalize("NFKD", name) if not _ud.combining(c))
+    return _re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")
+
+
+def career_history(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    """Every raider's history from our own logs: tiers raided, nights per tier and how they parsed in each."""
+    tiers_by_id = {t["id"]: t for t in _rows(conn, "SELECT id, name FROM zones")}
+    per_tier: dict[str, dict[int, dict]] = {}
+    for r in _rows(
+        conn,
+        """SELECT player_name, zone_id, COUNT(DISTINCT raid_date) AS raids,
+                  MIN(start_time) AS first_ms, MAX(start_time) AS last_ms
+           FROM v_attendance WHERE presence = 1 GROUP BY player_name, zone_id""",
+    ):
+        per_tier.setdefault(r["player_name"], {})[r["zone_id"]] = {
+            "zone_id": r["zone_id"], "tier": (tiers_by_id.get(r["zone_id"]) or {}).get("name"),
+            "raids": r["raids"], "first_ms": r["first_ms"], "last_ms": r["last_ms"], "parse": None, "kills": 0,
+        }
+    for r in _rows(
+        conn,
+        """SELECT player_name, zone_id, AVG(rank_percent) AS parse, COUNT(*) AS kills
+           FROM v_parses WHERE rank_percent IS NOT NULL GROUP BY player_name, zone_id""",
+    ):
+        row = per_tier.setdefault(r["player_name"], {}).setdefault(r["zone_id"], {
+            "zone_id": r["zone_id"], "tier": (tiers_by_id.get(r["zone_id"]) or {}).get("name"),
+            "raids": 0, "first_ms": None, "last_ms": None, "parse": None, "kills": 0})
+        row["parse"] = round(r["parse"], 1)
+        row["kills"] = r["kills"]
+    out = {}
+    for player, tiers in per_tier.items():
+        rows = sorted(tiers.values(), key=lambda t: t["zone_id"], reverse=True)
+        firsts = [t["first_ms"] for t in rows if t["first_ms"]]
+        out[player] = {
+            "tiers": [{**t, "first": ms_to_date(t["first_ms"]), "last": ms_to_date(t["last_ms"])} for t in rows],
+            "tier_count": sum(1 for t in rows if t["raids"]),
+            "total_raids": sum(t["raids"] for t in rows),
+            "since": ms_to_date(min(firsts)) if firsts else None,
+            "first_tier": next((t["tier"] for t in reversed(rows) if t["raids"]), None),
+        }
+    return out
+
+
+def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None = None, team: str | None = None,
+                   min_raids: int = 2, alts: dict[str, list[str]] | None = None,
+                   image_url: str = "/static/members/{slug}/{n}.webp") -> list[dict[str, Any]]:
+    """One card per raider for the Meet the Team page: their numbers, their character, a bio and a portrait prompt.
+
+    Only people who actually raid this tier (``min_raids`` nights, or any parse), sorted by attendance."""
+    import json as _json
+
+    from . import flavour
+
+    alts = alts or {}
+    home = home_guild(conn)
+    guild_name = home["name"] if home else ""
+    realm = f"{(home['realm_slug'] if home else '').title()} {(home['region'] if home else '').upper()}".strip()
+    zone = conn.execute("SELECT name, rio_raid_slug FROM zones WHERE id = ?", (zone_id,)).fetchone()
+    zone_slug = zone["rio_raid_slug"] if zone else None
+    data = roster(conn, zone_id, difficulty, team)
+    # Characters are keyed by name: a guild member may be on another realm, and names are unique within a raid.
+    chars = {r["name"]: r for r in _rows(conn, "SELECT * FROM characters WHERE missing = 0")}
+    history = career_history(conn)
+    cut_sql, cut_p = _before_cutoff(zone_cutoff(conn, zone_id), "start_time")
+    df_sql, df_p = (" AND difficulty = ?", (difficulty,)) if difficulty else ("", ())
+    tm_sql, tm_p = (" AND team = ?", (team,)) if team else ("", ())
+    per_boss: dict[str, list[dict]] = {}
+    for r in _rows(
+        conn,
+        f"""SELECT player_name, encounter_name, AVG(rank_percent) AS pct, COUNT(*) AS kills
+            FROM v_parses WHERE zone_id = ? AND rank_percent IS NOT NULL{df_sql}{tm_sql}{cut_sql}
+            GROUP BY player_name, encounter_name""",
+        (zone_id, *df_p, *tm_p, *cut_p),
+    ):
+        per_boss.setdefault(r["player_name"], []).append(r)
+
+    cards = []
+    for p in data["players"]:
+        if (p["raids"] or 0) < min_raids and not p["kills"]:
+            continue
+        bosses = sorted(per_boss.get(p["player"], []), key=lambda b: b["pct"]) if p["kills"] else []
+        c = chars.get(p["player"], {})
+        card = {
+            **p,
+            "team": team,
+            "race": c.get("race"), "gender": c.get("gender"),
+            "class": c.get("class") or p.get("class"),
+            "spec": c.get("spec") or p.get("spec"),
+            "item_level": c.get("item_level"),
+            "portrait_url": c.get("portrait_url"), "thumbnail_url": c.get("thumbnail_url"),
+            "profile_url": c.get("profile_url"),
+            "gear": _json.loads(c["gear"]) if c.get("gear") else {},
+            "best_boss": {"boss": bosses[-1]["encounter_name"], "pct": bosses[-1]["pct"]} if bosses else None,
+            "worst_boss": {"boss": bosses[0]["encounter_name"], "pct": bosses[0]["pct"]} if len(bosses) > 1 else None,
+        }
+        card["weapons"] = [card["gear"][s]["name"] for s in ("mainhand", "offhand")
+                           if card["gear"].get(s) and card["gear"][s].get("name")]
+        card["history"] = history.get(p["player"], {"tiers": [], "tier_count": 0, "total_raids": 0})
+        card["mplus_score"] = c.get("mplus_score")
+        card["mplus_role"] = c.get("mplus_role")
+        card["mplus_best"] = _json.loads(c["mplus_best"]) if c.get("mplus_best") else []
+        card["achievement_points"] = c.get("achievement_points")
+        prog = _json.loads(c["raid_progression"]) if c.get("raid_progression") else {}
+        card["personal_progress"] = prog.get(zone_slug) if zone_slug else None
+        card["alts"] = alts.get(p["player"], [])
+        card["stats"] = flavour.stats(card)
+        card["bio"] = flavour.bio(card)
+        prompts = flavour.portrait_prompts(card, guild_name, realm, zone["name"] if zone else None)
+        card["portrait_prompts"] = prompts
+        card["portrait_prompt"] = prompts[0]["prompt"]
+        slug = _slug(p["player"])
+        card["slug"] = slug
+        card["frames"] = [image_url.format(slug=slug, n=i + 1) for i in range(len(prompts))] if image_url else []
+        cards.append(card)
+    return cards
+
+
+def boss_pulls(conn: sqlite3.Connection, zone_id: int, encounter_id: int, difficulty: int,
+               team: str | None = None) -> dict[str, Any]:
+    """Every pull on one boss, in order, with the running best percentage.
+
+    This is the progression view for the boss we are actually working on: pull 1 to pull n, what each wipe got to,
+    which night it was, and where the best pull moved. ``pct_left`` is how much of the fight was left, so lower is
+    better and a kill is 0."""
+    _, _, tf, tp = _scope(team)
+    cut_sql, cut_p = _before_cutoff(zone_cutoff(conn, zone_id), "start_time")
+    boss = conn.execute(
+        "SELECT e.id, e.name, e.ord, e.zone_id, z.name AS zone_name FROM encounters e "
+        "JOIN zones z ON z.id = e.zone_id WHERE e.id = ?", (encounter_id,)
+    ).fetchone()
+    rows = _rows(
+        conn,
+        f"""SELECT report_code, fight_id, start_time, end_time, kill, fight_pct, boss_pct, last_phase,
+                   duration_s, pull_date, avg_ilvl, size
+            FROM v_pulls WHERE zone_id = ? AND encounter_id = ? AND difficulty = ?{tf}{cut_sql}
+            ORDER BY start_time""",
+        (zone_id, encounter_id, difficulty, *tp, *cut_p),
+    )
+    pulls, best_so_far, nights = [], None, []
+    for i, r in enumerate(rows, start=1):
+        pct = 0.0 if r["kill"] else r["fight_pct"]
+        if pct is not None and (best_so_far is None or pct < best_so_far):
+            best_so_far = pct
+        if not nights or nights[-1]["date"] != r["pull_date"]:
+            nights.append({"date": r["pull_date"], "first_pull": i, "pulls": 0, "best": None, "kill": False})
+        night = nights[-1]
+        night["pulls"] += 1
+        night["kill"] = night["kill"] or bool(r["kill"])
+        if pct is not None and (night["best"] is None or pct < night["best"]):
+            night["best"] = pct
+        pulls.append({
+            "n": i, "date": r["pull_date"], "start_time": r["start_time"], "kill": bool(r["kill"]),
+            "pct_left": round(pct, 2) if pct is not None else None,
+            "boss_pct": round(r["boss_pct"], 2) if r["boss_pct"] is not None else None,
+            "phase": r["last_phase"], "duration_s": round(r["duration_s"] or 0),
+            "best_so_far": round(best_so_far, 2) if best_so_far is not None else None,
+            "report_code": r["report_code"], "fight_id": r["fight_id"],
+            "log_url": f"https://www.warcraftlogs.com/reports/{r['report_code']}#fight={r['fight_id']}",
+        })
+    wipes = [p for p in pulls if not p["kill"]]
+    kill = next((p for p in pulls if p["kill"]), None)
+    best = min((p["pct_left"] for p in wipes if p["pct_left"] is not None), default=None)
+    ilvls = [r["avg_ilvl"] for r in rows if r["avg_ilvl"]]
+    return {
+        "boss": dict(boss) if boss else None,
+        "difficulty": difficulty,
+        "difficulty_name": DIFFICULTIES.get(difficulty, str(difficulty)),
+        "team": team,
+        "pulls": pulls,
+        "nights": nights,
+        "total_pulls": len(pulls),
+        "wipes": len(wipes),
+        "killed": bool(kill),
+        "kill_pull": kill["n"] if kill else None,
+        "kill_date": kill["date"] if kill else None,
+        "best_pct": best,
+        "best_pull": next((p["n"] for p in wipes if p["pct_left"] == best), None) if best is not None else None,
+        "last_pct": pulls[-1]["pct_left"] if pulls else None,
+        "hours": round(sum(p["duration_s"] for p in pulls) / 3600.0, 1),
+        "longest_s": max((p["duration_s"] for p in pulls), default=0),
+        "avg_ilvl": round(sum(ilvls) / len(ilvls), 1) if ilvls else None,
+        "first_pull_date": pulls[0]["date"] if pulls else None,
+        "last_pull_date": pulls[-1]["date"] if pulls else None,
+    }
 
 
 def unattributed_reports(conn: sqlite3.Connection, zone_id: int) -> int:

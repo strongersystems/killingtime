@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% set context_bar = true %}
+{% block title %}{{ data.boss.name if data and data.boss else 'Boss' }}{% endblock %}
+{% block content %}
+{% if not data or not data.boss %}
+<div class="page-head"><h1>Boss not found</h1></div>
+<div class="card"><p>No boss with that id in this tier. <a href="{{ base }}/">Back to progress</a>.</p></div>
+{% else %}
+{% set d = data %}
+<div class="page-head">
+  <div>
+    <h1>{{ d.boss.name }} <span class="pill {{ d.difficulty_name|lower }}">{{ d.difficulty_name }}</span></h1>
+    <small>{{ team_label }} · {{ d.boss.zone_name }} · pull by pull{% if d.first_pull_date %} · {{ d.first_pull_date }} → {{ d.last_pull_date }}{% endif %}</small>
+  </div>
+  <div class="tools"><a href="{{ link(base ~ '/', tier=zone_id, d=difficulty) }}">← all bosses</a></div>
+</div>
+
+{% if not d.pulls %}
+<div class="card"><p>No pulls on {{ d.boss.name }} at {{ d.difficulty_name }} in our logs yet.
+  {% for dd, o in other.items() if o.total_pulls and dd != difficulty %}
+  <a href="{{ link(base ~ '/boss/' ~ d.boss.id, tier=zone_id, d=dd) }}">{{ o.difficulty_name }} has {{ o.total_pulls }} pulls</a>.
+  {% endfor %}</p></div>
+{% else %}
+<div class="hero-row">
+  <div class="tile hero wide">
+    <div class="label">{% if d.killed %}Killed{% else %}Best pull{% endif %}</div>
+    <div class="value">{% if d.killed %}pull {{ d.kill_pull }}{% else %}{{ d.best_pct|num(1) }}<span class="muted">% left</span>{% endif %}</div>
+    <div class="progress {{ d.difficulty_name|lower }}"><span style="width: {{ 100 - (d.best_pct if d.best_pct is not none else 100) }}%"></span></div>
+    <div class="sub">{% if d.killed %}Down on {{ d.kill_date }} after {{ d.kill_pull }} pulls{% else %}{{ d.total_pulls }} pulls over {{ d.nights|length }} night{{ 's' if d.nights|length != 1 }}, best on pull {{ d.best_pull }}{% endif %}
+      · last pull {{ d.last_pct|num(1) if d.last_pct is not none else '—' }}%</div>
+    <div class="diff-strip">
+      {% for dd, o in other.items() if o.total_pulls or dd == difficulty %}
+      <a href="{{ link(base ~ '/boss/' ~ d.boss.id, tier=zone_id, d=dd) }}" class="{{ 'active' if dd == difficulty }}">
+        <span class="pill {{ o.difficulty_name|lower }}">{{ o.difficulty_name }}</span> {{ o.total_pulls }} pulls{% if o.killed %} ✓{% endif %}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="tiles compact">
+    <div class="tile"><div class="label">Pulls</div><div class="value">{{ d.total_pulls }}</div><div class="sub">{{ d.wipes }} wipes{% if d.killed %} · killed{% endif %}</div></div>
+    <div class="tile"><div class="label">Nights</div><div class="value">{{ d.nights|length }}</div><div class="sub">{{ d.hours }} h in combat</div></div>
+    <div class="tile"><div class="label">Best %</div><div class="value">{{ d.best_pct|num(1) if d.best_pct is not none else '—' }}<span class="muted">%</span></div><div class="sub">lower is better · pull {{ d.best_pull or '—' }}</div></div>
+    <div class="tile"><div class="label">Longest pull</div><div class="value">{{ (d.longest_s // 60)|int }}<span class="muted">m</span> {{ (d.longest_s % 60)|int }}<span class="muted">s</span></div><div class="sub">avg ilvl {{ d.avg_ilvl or '—' }}</div></div>
+  </div>
+</div>
+
+<div id="charts" style="margin-top:1rem"></div>
+
+<div class="card" style="margin-top:1rem">
+  <h2><span>Nights</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Night</th><th class="num">Pulls</th><th class="num">From pull</th><th class="num">Best that night</th><th></th></tr></thead>
+    <tbody>
+      {% for n in d.nights %}
+      <tr class="{{ 'killed' if n.kill }}"><td>{{ n.date }}</td><td class="num">{{ n.pulls }}</td><td class="num">{{ n.first_pull }}</td>
+        <td class="num">{{ n.best|num(1) if n.best is not none else '—' }}%</td><td>{% if n.kill %}kill{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:1rem">
+  <h2><span>Every pull</span><span class="tools muted">{{ d.total_pulls }} pulls</span></h2>
+  <div class="table-scroll">
+  <table class="pulls">
+    <thead><tr><th class="num">#</th><th>Date</th><th class="num">% left</th><th class="num">Best so far</th><th class="num">Phase</th><th class="num">Duration</th><th>Log</th></tr></thead>
+    <tbody>
+      {% for p in d.pulls %}
+      <tr class="{{ 'killed' if p.kill }}">
+        <td class="num">{{ p.n }}</td>
+        <td>{{ p.date }}</td>
+        <td class="num">{% if p.kill %}<b>kill</b>{% else %}{{ p.pct_left|num(1) if p.pct_left is not none else '—' }}%{% endif %}</td>
+        <td class="num">{{ p.best_so_far|num(1) if p.best_so_far is not none else '—' }}%</td>
+        <td class="num">{{ p.phase or '—' }}</td>
+        <td class="num">{{ (p.duration_s // 60)|int }}:{{ '%02d'|format(p.duration_s % 60) }}</td>
+        <td><a href="{{ p.log_url }}" target="_blank" rel="noopener">wcl</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if data and data.pulls %}
+<script>
+(function () {
+  const d = {{ chart_data|safe }};
+  const root = document.getElementById("charts");
+  if (!root || !d.pulls || !d.pulls.length) return;
+  const pts = d.pulls.filter((p) => p.pct_left !== null);
+  KT.mount(root, {
+    title: `Pull by pull on ${d.boss.name} (${d.difficulty_name})`, type: "line", xLinear: true, xTickPrefix: "pull ",
+    xTitle: "pull", yTitle: "% of the boss left", yMax: 100,
+    series: [
+      { name: "This pull", data: pts.map((p) => ({ x: p.n, y: p.pct_left, label: `Pull ${p.n} · ${p.date}${p.kill ? " · KILL" : ""}` })) },
+      { name: "Best so far", data: pts.map((p) => ({ x: p.n, y: p.best_so_far, label: `Best after pull ${p.n}` })), emphasis: true },
+    ],
+    note: "Lower is better: this is how much of the boss was still standing when the pull ended. The best-so-far line only goes down; a kill sits at 0%.",
+  });
+  if (d.nights.length > 1) {
+    KT.mount(root, {
+      title: "Pulls per night on this boss", type: "bar", labels: d.nights.map((n) => n.date),
+      series: [{ name: "Pulls", data: d.nights.map((n) => n.pulls) }], yTitle: "pulls",
+    });
+    KT.mount(root, {
+      title: "Best percentage each night", type: "line", labels: d.nights.map((n) => n.date),
+      series: [{ name: "Best % left", data: d.nights.map((n) => n.best) }], yTitle: "% left",
+      note: "The night-by-night version of the same story: how far we got each time we came back.",
+    });
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

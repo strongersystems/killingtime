@@ -65,6 +65,10 @@ class RaiderIOClient:
     def static_data(self, expansion_id: int) -> dict:
         return self._get("/raiding/static-data", {"expansion_id": expansion_id})
 
+    def character_profile(self, region: str, realm: str, name: str, fields: str = "gear,guild") -> dict:
+        """One character's profile: race, class, active spec, item level, gear and the Blizzard render URL."""
+        return self._get("/characters/profile", {"region": region, "realm": realm, "name": name, "fields": fields})
+
     def mythic_plus_static_data(self, expansion_id: int) -> dict:
         """Season reference data. Used for the season cut-off: the date after which a kill no longer earns
         Cutting Edge / Ahead of the Curve, which is also when the Mythic+ season ends."""

@@ -353,3 +353,73 @@ def test_peers_respect_the_cutoff_and_declare_untracked_bosses(synced):
     assert next(b for b in fallback["bosses"] if b["slug"] == "dimensius")["killed"] is False
     assert metrics.raid_cutoff(conn, "manaforge-omega") is not None
     assert metrics.raid_cutoff(conn, "the-venomous-abyss") is None  # season still running
+
+
+def test_meet_the_team(synced):
+    """Cards carry the character profile, a bio from the player's own numbers and a portrait prompt."""
+    conn, *_ = synced
+    assert conn.execute("SELECT COUNT(*) FROM characters WHERE missing = 0").fetchone()[0] >= 3
+    cards = metrics.meet_the_team(conn, 46, 4, min_raids=1)
+    by_name = {c["player"]: c for c in cards}
+    assert "Tagrik" in by_name and "Puggy" not in by_name  # other-realm pugs are not team members
+    t = by_name["Tagrik"]
+    assert t["race"] == "Orc" and t["class"] == "Warrior" and t["spec"] == "Arms"
+    assert t["weapons"] == ["Bonecleaver of Poor Decisions"]
+    assert t["portrait_url"].endswith("-inset.jpg") and t["thumbnail_url"].endswith("-avatar.jpg")
+    assert 4 <= len(t["bio"]) <= 8 and all(line.strip() for line in t["bio"])
+    assert t["slug"] == "tagrik" and len(t["frames"]) == 5 and t["frames"][0].endswith("/tagrik/1.webp")
+    assert [f["label"] for f in t["portrait_prompts"]][0] == "At arms"
+    assert len(t["portrait_prompts"]) == 5
+    assert t["history"]["total_raids"] >= 1 and t["history"]["tiers"]
+    assert {s["label"] for s in t["stats"]} >= {"Raids this tier", "Attendance", "Avg parse", "Career raids"}
+    prompt = t["portrait_prompt"]
+    for needle in ("Tagrik", "Orc", "Arms", "Warrior", "Bonecleaver of Poor Decisions", "Killing Time",
+                   "the Venomous Abyss raid floor", "Pose:", "Style:"):
+        assert needle in prompt, needle
+    assert "the The Venomous Abyss" not in prompt
+    # a healer gets healer flavour and both weapons
+    sixer = by_name["Sixer"]
+    assert "Tome of Unread Whispers" in sixer["portrait_prompt"] and sixer["role"] == "healers"
+    # bios are stable between calls
+    assert metrics.meet_the_team(conn, 46, 4, min_raids=1)[0]["bio"] == cards[0]["bio"]
+
+
+def test_meet_the_team_page(synced):
+    conn, *_, settings = synced
+    client = TestClient(create_app(settings, conn))
+    for path in ("/t/guild/meet", "/t/ce-team/meet", "/t/6-hour-team/meet?d=4"):
+        assert client.get(path).status_code == 200, path
+    page = client.get("/t/guild/meet?d=4").text
+    assert "Meet the team" in page and "Tagrik" in page and "Portrait prompt" in page
+    assert "-inset.jpg" in page
+    api = client.get("/api/meet/46?difficulty=4").json()
+    assert any(c["player"] == "Tagrik" and c["portrait_prompt"] for c in api)
+
+
+def test_boss_pulls(synced):
+    """The pull-by-pull view for the boss we are working on: every pull, the running best, nights."""
+    conn, *_ = synced
+    d = metrics.boss_pulls(conn, 46, 3202, 5)  # Entombed Sentinels, Mythic: 4 pulls over two nights, no kill
+    assert d["boss"]["name"] == "Entombed Sentinels" and d["killed"] is False
+    assert d["total_pulls"] == 4 and d["wipes"] == 4  # the duplicate log of night one is not counted twice
+    assert [p["n"] for p in d["pulls"]] == [1, 2, 3, 4]
+    assert [p["pct_left"] for p in d["pulls"]] == [80.0, 66.0, 41.2, 38.0]
+    assert [p["best_so_far"] for p in d["pulls"]] == [80.0, 66.0, 41.2, 38.0]  # only ever falls
+    assert d["best_pct"] == 38.0 and d["best_pull"] == 4 and d["last_pct"] == 38.0
+    assert [n["pulls"] for n in d["nights"]] == [1, 3] and len(d["nights"]) == 2
+    assert d["pulls"][0]["log_url"].startswith("https://www.warcraftlogs.com/reports/")
+
+    kill = metrics.boss_pulls(conn, 46, 3201, 5)  # killed on the third pull
+    assert kill["killed"] and kill["kill_pull"] == 3 and kill["pulls"][2]["pct_left"] == 0.0
+    assert metrics.boss_pulls(conn, 46, 3203, 5)["total_pulls"] == 0  # never pulled at Mythic
+
+
+def test_boss_page(synced):
+    conn, *_, settings = synced
+    client = TestClient(create_app(settings, conn))
+    page = client.get("/t/guild/boss/3202?tier=46&d=5")
+    assert page.status_code == 200
+    assert "Entombed Sentinels" in page.text and "Pull by pull" in page.text and "38.0" in page.text
+    assert client.get("/t/guild/boss/3203?tier=46&d=5").status_code == 200  # no pulls: still renders
+    api = client.get("/api/boss/46/3202?difficulty=5").json()
+    assert api["total_pulls"] == 4 and api["best_pct"] == 38.0

@@ -20,6 +20,12 @@ A progress and reporting app for the guild **Killing Time** (Draenor, EU). It pu
   pull counts, best percentages, a "progress race" chart, world/region/realm ranks.
 - **Roster** – attendance % and Warcraft Logs parses (average/median/best percentile) per raider in one table, plus
   parses per boss and per raid night; other-realm pugs hidden by default.
+- **Boss** – the pull-by-pull view for the boss you are actually working on: every pull with how much of the boss
+  was left, the running best percentage, phase, duration and a link to that pull on Warcraft Logs, plus per-night
+  totals and the progression chart.
+- **Meet the team** – a card per raider built from their own numbers: a mildly comical bio, attendance, parses,
+  Mythic+, raid history and alts, their live transmog and weapons, and five image prompts (hero shot first) whose
+  generated frames animate on hover.
 - **Nights** – per-night kills, wipes and hours in combat.
 - **Public site** – a self-contained landing page (`/public`, served at `killingtime.fyi` on Cloudflare) with links
   to apply / Discord / Raider.IO / Warcraft Logs and the latest progress, per-team standings and recent kills.
@@ -83,7 +89,7 @@ guild's Warcraft Logs reports. Such kills are shown as "no log" and have no pull
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 44 tests, no network needed
+pytest -q          # 48 tests, no network needed
 ruff check .
 ```
 

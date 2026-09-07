@@ -192,3 +192,41 @@ tr.active td:nth-child(2)::after { content: " · in progress"; color: var(--warn
 tr.post td { color: var(--muted); }
 tr.post td:first-child::before { content: "✓ "; color: var(--muted); }
 .sub.achievement { margin-top: .6rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+
+/* Meet the team */
+.meet-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.card.member { display: flex; flex-direction: column; gap: .75rem; }
+.member-head { display: flex; gap: .9rem; align-items: flex-start; }
+.member-head .portrait { width: 84px; height: 84px; border-radius: 12px; object-fit: cover; border: 1px solid var(--border); background: var(--surface-2); flex: none; }
+.member-head .portrait.placeholder { display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: 700; color: var(--muted); }
+.member-head .who { min-width: 0; }
+.member-head h2 { margin: 0; font-size: 1.15rem; }
+.member-head .tags { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .45rem; }
+.card.member .bio p { margin: 0 0 .45rem; font-size: .93rem; color: var(--ink-2); }
+.card.member .bio p:last-child { margin-bottom: 0; }
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem; border-top: 1px solid var(--grid); padding-top: .6rem; }
+.stat-row .label { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.stat-row b { font-size: 1.05rem; }
+.card.member .kit { margin: 0; font-size: .85rem; }
+.prompt summary { cursor: pointer; color: var(--accent); font-size: .85rem; font-weight: 600; }
+.prompt textarea { width: 100%; margin-top: .5rem; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border); border-radius: 8px; padding: .6rem; font: inherit; font-size: .82rem; resize: vertical; }
+.prompt .copy { margin-top: .4rem; font-size: .8rem; padding: .35rem .7rem; }
+
+/* Meet the team: portrait frames, stat grid and the prompt drawer. */
+.portrait-stack { position: relative; width: 96px; height: 96px; flex: none; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-2); outline: none; }
+.portrait-stack .portrait { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; }
+.portrait-stack.animated { cursor: pointer; }
+.portrait-stack.animated:hover, .portrait-stack:focus-visible { border-color: var(--accent); }
+.portrait-stack .frame-badge { position: absolute; right: .25rem; bottom: .2rem; font-size: .6rem; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 85%, transparent); border-radius: 999px; padding: 0 .35rem; pointer-events: none; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: .5rem .6rem; border-top: 1px solid var(--grid); padding-top: .6rem; }
+.stat-grid .label { display: block; font-size: .65rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.stat-grid b { font-size: 1rem; }
+details.drop summary { cursor: pointer; font-size: .85rem; font-weight: 600; color: var(--accent); }
+details.drop table.mini { width: 100%; margin-top: .4rem; font-size: .8rem; }
+details.drop table.mini th, details.drop table.mini td { padding: .2rem .35rem; }
+.prompt .hint { font-size: .78rem; margin: .5rem 0; }
+.prompt .hint code { font-size: .75rem; background: var(--surface-2); padding: 0 .25rem; border-radius: 4px; }
+.prompt-frame { margin-bottom: .6rem; }
+.prompt-label { display: flex; align-items: center; justify-content: space-between; gap: .5rem; font-size: .82rem; }
+.prompt-label .copy { margin: 0; font-size: .72rem; padding: .2rem .5rem; }
+.prompt .copy-all { font-size: .8rem; padding: .35rem .7rem; }

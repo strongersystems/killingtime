@@ -36,6 +36,7 @@ class SyncStats:
     fights: int = 0
     attendance_rows: int = 0
     parses: int = 0
+    characters: int = 0
     rio_guilds: int = 0
     rio_progress_rows: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -478,7 +479,118 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
     progress(f"parses synced for {done} reports ({stats.parses} rows)")
 
 
+CHARACTER_FIELDS = "gear,guild,mythic_plus_scores_by_season:current,mythic_plus_best_runs,raid_progression"
+
+
+def sync_characters(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Settings, zone_id: int | None,
+                    stats: SyncStats, progress: Progress, min_raids: int = 2, max_age_days: int = 3,
+                    retry_missing: bool = False) -> None:
+    """Fetch Raider.IO profiles (race, spec, gear, portrait) for the current tier's raiders.
+
+    Only people who actually raid: someone with at least ``min_raids`` nights in the tier, or any parse. Profiles are
+    refreshed every few days, and a character Raider.IO cannot find is remembered so we stop asking."""
+    if zone_id is None:
+        return
+    home = settings.home_guild
+    rows = _rows_sync(
+        conn,
+        """SELECT player_name, COUNT(DISTINCT raid_date) AS raids FROM v_attendance
+           WHERE zone_id = ? AND presence = 1 GROUP BY player_name""",
+        (zone_id,),
+    )
+    parsed = {
+        r["player_name"] for r in _rows_sync(
+            conn,
+            """SELECT DISTINCT player_name FROM v_parses WHERE zone_id = ?
+               AND (server IS NULL OR LOWER(REPLACE(server, char(39), '')) = ?)""",
+            (zone_id, home.realm_slug.replace("-", " ")),
+        )
+    }
+    wanted = sorted({r["player_name"] for r in rows if r["raids"] >= min_raids} | parsed)
+    if not wanted:
+        return
+    # Guild members are often on another realm; their parses tell us which one.
+    alt_realm: dict[str, str] = {}
+    for r in _rows_sync(
+        conn,
+        """SELECT player_name, server, COUNT(*) AS n FROM v_parses WHERE zone_id = ? AND server IS NOT NULL
+           GROUP BY player_name, server ORDER BY n DESC""",
+        (zone_id,),
+    ):
+        alt_realm.setdefault(r["player_name"], slugify(r["server"]))
+    fresh_after = now_ms() - max_age_days * 86_400_000
+    known = {
+        r["name"]: r for r in _rows_sync(conn, "SELECT name, fetched_at, missing FROM characters WHERE region = ?", (home.region,))
+    }
+    todo = [
+        n for n in wanted
+        if n not in known
+        or (known[n]["fetched_at"] < fresh_after and not known[n]["missing"])
+        # A character Raider.IO could not find is retried on a full sync, or after a week in case they came back.
+        or (known[n]["missing"] and (retry_missing or known[n]["fetched_at"] < now_ms() - 7 * 86_400_000))
+    ]
+    if not todo:
+        progress(f"characters: {len(wanted)} raiders, all profiles fresh")
+        return
+    progress(f"fetching character profiles for {len(todo)} raiders")
+    found = 0
+    for name in todo:
+        prof, realm_slug = None, home.realm_slug
+        for candidate in dict.fromkeys([home.realm_slug, alt_realm.get(name)]):
+            if not candidate:
+                continue
+            try:
+                prof = rio.character_profile(home.region, candidate, name, fields=CHARACTER_FIELDS)
+                realm_slug = candidate
+                break
+            except RaiderIOError:
+                continue
+        if prof is None:
+            # Raider.IO does not know this character (renamed, transferred, or an alt we cannot place).
+            with transaction(conn):
+                conn.execute(
+                    """INSERT INTO characters(name, realm_slug, region, missing, fetched_at) VALUES (?, ?, ?, 1, ?)
+                       ON CONFLICT(name, realm_slug, region) DO UPDATE SET missing = 1, fetched_at = excluded.fetched_at""",
+                    (name, home.realm_slug, home.region, now_ms()),
+                )
+            continue
+        seasons = prof.get("mythic_plus_scores_by_season") or []
+        scores = (seasons[0].get("scores") if seasons else {}) or {}
+        best_role = max(("dps", "healer", "tank"), key=lambda r: scores.get(r) or 0) if scores else None
+        runs = [
+            {"level": r.get("mythic_level"), "dungeon": r.get("dungeon"), "score": r.get("score")}
+            for r in (prof.get("mythic_plus_best_runs") or [])[:3]
+        ]
+        gear = (prof.get("gear") or {}).get("items") or {}
+        slim = {
+            slot: {"name": item.get("name"), "item_level": item.get("item_level"), "icon": item.get("icon")}
+            for slot, item in gear.items() if isinstance(item, dict) and item.get("name")
+        }
+        thumb = prof.get("thumbnail_url") or ""
+        with transaction(conn):
+            conn.execute(
+                """INSERT OR REPLACE INTO characters(name, realm_slug, region, class, race, gender, spec, role,
+                       item_level, thumbnail_url, portrait_url, profile_url, guild_name, gear, mplus_score, mplus_role,
+                       mplus_best, raid_progression, achievement_points, faction, missing, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
+                (prof.get("name") or name, realm_slug, home.region, prof.get("class"), prof.get("race"),
+                 prof.get("gender"), prof.get("active_spec_name"), (prof.get("active_spec_role") or "").lower(),
+                 (prof.get("gear") or {}).get("item_level_equipped"), thumb,
+                 thumb.replace("-avatar.jpg", "-inset.jpg"), prof.get("profile_url"),
+                 (prof.get("guild") or {}).get("name"), json.dumps(slim), scores.get("all"), best_role,
+                 json.dumps(runs), json.dumps(prof.get("raid_progression") or {}), prof.get("achievement_points"),
+                 prof.get("faction"), now_ms()),
+            )
+        found += 1
+    stats.characters = found
+    progress(f"character profiles synced: {found} of {len(todo)}")
+
+
 # ------------------------------------------------------------------------------------ Raider.IO
+def _rows_sync(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict]:
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
 def _store_profile(conn: sqlite3.Connection, ref: GuildRef, prof: dict, *, is_home: bool, is_rival: bool) -> int:
     gid = upsert_guild(conn, ref, faction=prof.get("faction"), is_home=is_home if is_home else None, is_rival=is_rival if is_rival else None)
     ts = now_ms()
@@ -791,6 +903,10 @@ def run_sync(
         if rio is not None:
             progress("== Raider.IO ==")
             sync_raiderio(conn, rio, settings, stats, progress)
+            newest = conn.execute(
+                """SELECT z.id FROM zones z WHERE EXISTS (SELECT 1 FROM reports r WHERE r.zone_id = z.id)
+                   ORDER BY z.id DESC LIMIT 1""").fetchone()
+            sync_characters(conn, rio, settings, newest["id"] if newest else None, stats, progress, retry_missing=full)
             stats.rio_requests = rio.requests_made
         set_meta(conn, "last_sync", str(now_ms()))
         conn.commit()

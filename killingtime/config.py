@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     # with the most roster members in attendance; a report needs at least RAID_TEAM_MIN_MATCHES matches.
     raid_teams: str = ""
     raid_team_min_matches: int = 2
+    # Alts, which no API exposes: "Findruid: Findpal, Finddk; Norman: Normanpriest". Shown on Meet the Team.
+    raid_alts: str = ""
+    # Where a member's generated portrait frames live. {slug} is the lower-case name, {n} the frame number (1-5).
+    # Drop five images per player anywhere reachable and the Meet the Team card animates them on hover.
+    member_image_url: str = "/static/members/{slug}/{n}.webp"
     # Parses: how many reports' rankings to fetch per sync (keeps the WCL points budget in check).
     sync_parses_per_run: int = 60
 
@@ -134,6 +139,11 @@ class Settings(BaseSettings):
     @property
     def teams(self) -> dict[str, list[str]]:
         return parse_raid_teams(self.raid_teams)
+
+    @property
+    def alts(self) -> dict[str, list[str]]:
+        """{main: [alts]} from RAID_ALTS. No API links alts to a player, so this is filled in by hand."""
+        return parse_raid_teams(self.raid_alts)
 
     @property
     def team_names(self) -> list[str]:

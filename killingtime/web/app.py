@@ -262,6 +262,35 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
             request, "roster.html",
             {**c, "data": data, "coverage": coverage, "pugs": bool(pugs), "chart_data": json.dumps(data, default=str)}), slug)
 
+    @app.get("/t/{slug}/meet", response_class=HTMLResponse)
+    def meet_page(request: Request, slug: str, tier: int | None = None, d: int | None = None):
+        c = ctx(request, slug, tier=tier, d=d)
+        with db_lock:
+            cards = metrics.meet_the_team(conn, c["zone_id"], c["difficulty"], c["team"], alts=settings.alts, image_url=settings.member_image_url) if c["zone_id"] else []
+        return with_cookie(templates.TemplateResponse(request, "meet.html", {**c, "cards": cards}), slug)
+
+    @app.get("/t/{slug}/boss/{encounter_id}", response_class=HTMLResponse)
+    def boss_page(request: Request, slug: str, encounter_id: int, tier: int | None = None, d: int | None = None):
+        c = ctx(request, slug, tier=tier, d=d)
+        with db_lock:
+            data = metrics.boss_pulls(conn, c["zone_id"], encounter_id, c["difficulty"], c["team"]) if c["zone_id"] else None
+            other = {dd: metrics.boss_pulls(conn, c["zone_id"], encounter_id, dd, c["team"])
+                     for dd in (5, 4, 3)} if c["zone_id"] else {}
+        return with_cookie(templates.TemplateResponse(
+            request, "boss.html",
+            {**c, "data": data, "other": other, "chart_data": json.dumps(data, default=str)}), slug)
+
+    @app.get("/api/boss/{zone_id}/{encounter_id}")
+    def api_boss(zone_id: int, encounter_id: int, difficulty: int = 5, team: str | None = None):
+        with db_lock:
+            return as_json(metrics.boss_pulls(conn, zone_id, encounter_id, difficulty, team))
+
+    @app.get("/api/meet/{zone_id}")
+    def api_meet(zone_id: int, difficulty: int | None = None, team: str | None = None):
+        with db_lock:
+            return as_json(metrics.meet_the_team(conn, zone_id, difficulty, team, alts=settings.alts,
+                                                 image_url=settings.member_image_url))
+
     @app.get("/t/{slug}/nights", response_class=HTMLResponse)
     def nights_page(request: Request, slug: str, tier: int | None = None, d: int | None = None):
         c = ctx(request, slug, tier=tier, d=d)

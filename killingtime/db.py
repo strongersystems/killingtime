@@ -203,6 +203,23 @@ CREATE TABLE IF NOT EXISTS parses (
     PRIMARY KEY (report_code, fight_id, player_name, metric)
 );
 CREATE INDEX IF NOT EXISTS idx_parses_encounter ON parses(encounter_id, difficulty);
+
+-- Character profiles from Raider.IO: race, spec, gear and the Blizzard portrait, for the Meet the Team page.
+CREATE TABLE IF NOT EXISTS characters (
+    name TEXT NOT NULL,
+    realm_slug TEXT NOT NULL,
+    region TEXT NOT NULL,
+    class TEXT, race TEXT, gender TEXT, spec TEXT, role TEXT,
+    item_level REAL,
+    thumbnail_url TEXT,               -- Blizzard avatar render
+    portrait_url TEXT,                -- larger bust render (same image, -inset)
+    profile_url TEXT,
+    guild_name TEXT,
+    gear TEXT,                        -- JSON: slot -> {name, item_level}
+    missing INTEGER NOT NULL DEFAULT 0,  -- 1 when Raider.IO has no such character (do not keep retrying every sync)
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (name, realm_slug, region)
+);
 """
 
 # Columns added after the first release: (table, column, definition).
@@ -216,6 +233,13 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("rio_raids", "ends_at", "INTEGER"),
     ("rio_raids", "season_slug", "TEXT"),
     ("rio_raids", "cutoff_at", "INTEGER"),
+    # Character extras for Meet the Team: Mythic+ score and best keys, personal raid progress, achievement points.
+    ("characters", "mplus_score", "REAL"),
+    ("characters", "mplus_role", "TEXT"),
+    ("characters", "mplus_best", "TEXT"),
+    ("characters", "raid_progression", "TEXT"),
+    ("characters", "achievement_points", "INTEGER"),
+    ("characters", "faction", "TEXT"),
 ]
 
 VIEWS = """
@@ -368,6 +392,7 @@ TABLE_DOCS: dict[str, str] = {
     "rio_summary": "Raider.IO 'X/Y M' summary per guild per raid.",
     "rio_rankings": "Raider.IO world/region/realm rank per guild, raid and difficulty (0 = unranked).",
     "rio_progress / v_rio_progress": "Raider.IO per-boss progress for ALL tracked guilds (home, rivals, realm leaderboard): first_defeated, num_pulls, best_percent. Use this to compare guilds.",
+    "characters": "Raider.IO character profiles for the raid roster: race, class, spec, role, item level, gear (JSON) and portrait URLs.",
     "sync_log / meta": "Sync bookkeeping.",
 }
 

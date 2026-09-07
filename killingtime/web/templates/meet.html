@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% set context_bar = true %}
+{% block title %}Meet the team{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{{ team_label }} <span class="muted">·</span> Meet the team</h1>
+  <small>Everyone who raided {{ zone.name if zone else 'this tier' }}{% if difficulty %} at {{ DIFFICULTIES[difficulty] }}{% endif %}.
+    Bios are written from their own attendance, parses, Mythic+ and raid history, so any slander is self-inflicted.
+    Hover a portrait (or scroll it into view on a phone) to flip through their five poses.
+    Each card carries the prompts that made them, built from their live transmog and weapons.</small></div>
+</div>
+
+{% if not cards %}
+<div class="card"><p>No raiders to show for this tier yet. Attendance and character profiles arrive with the next sync.</p></div>
+{% else %}
+<div class="meet-grid">
+  {% for p in cards %}
+  <div class="card member">
+    <div class="member-head">
+      <div class="portrait-stack" data-frames="{{ p.frames|length }}" tabindex="0">
+        {% if p.portrait_url %}
+        <img class="portrait base" src="{{ p.portrait_url }}" alt="{{ p.player }}" loading="lazy"
+             onerror="this.onerror=null;this.src='{{ p.thumbnail_url }}';">
+        {% else %}
+        <div class="portrait base placeholder">{{ p.player[0]|upper }}</div>
+        {% endif %}
+        {% for f in p.frames %}
+        <img class="portrait anim" data-src="{{ f }}" alt="" hidden>
+        {% endfor %}
+        <span class="frame-badge" hidden>▶</span>
+      </div>
+      <div class="who">
+        <h2>{% if p.profile_url %}<a href="{{ p.profile_url }}" target="_blank" rel="noopener">{{ p.player }}</a>{% else %}{{ p.player }}{% endif %}</h2>
+        <div class="muted">{{ [p.gender, p.race, p.spec, p.class]|select|join(' ') }}</div>
+        <div class="tags">
+          {% if p.role %}<span class="pill">{{ {'tanks': 'Tank', 'healers': 'Healer', 'dps': 'DPS'}.get(p.role, p.role)|title }}</span>{% endif %}
+          {% if p.item_level %}<span class="pill">{{ p.item_level|round(0)|int }} ilvl</span>{% endif %}
+          {% if p.pct is not none %}<span class="pill {{ 'good' if p.pct >= 80 }}">{{ p.pct }}% attendance</span>{% endif %}
+          {% if p.avg is not none %}<span class="pill {{ 'good' if p.avg >= 75 else ('bad' if p.avg < 25) }}">{{ p.avg|round(0)|int }} avg parse</span>{% endif %}
+          {% if p.mplus_score %}<span class="pill">{{ p.mplus_score|round(0)|int }} M+</span>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="bio">{% for line in p.bio %}<p>{{ line }}</p>{% endfor %}</div>
+
+    <div class="stat-grid">
+      {% for s in p.stats %}<div><span class="label">{{ s.label }}</span><b>{{ s.value }}</b></div>{% endfor %}
+    </div>
+
+    {% if p.weapons %}<p class="muted kit">Carrying {{ p.weapons|join(' and ') }}.</p>{% endif %}
+    {% if p.alts %}<p class="muted kit">Alts on standby: {{ p.alts|join(', ') }}.</p>{% endif %}
+    {% if p.personal_progress and p.personal_progress.summary %}
+    <p class="muted kit">Armory progress for {{ zone.name if zone else 'this tier' }}: <b>{{ p.personal_progress.summary }}</b>.</p>
+    {% endif %}
+
+    {% if p.history and p.history.tiers %}
+    <details class="drop">
+      <summary>Raid history <span class="muted">· {{ p.history.total_raids }} nights over {{ p.history.tier_count }} tier{{ 's' if p.history.tier_count != 1 }}{% if p.history.since %}, since {{ p.history.since }}{% endif %}</span></summary>
+      <table class="mini">
+        <thead><tr><th>Tier</th><th class="num">Nights</th><th class="num">Kills parsed</th><th class="num">Avg parse</th><th>First seen</th></tr></thead>
+        <tbody>
+          {% for t in p.history.tiers %}
+          <tr><td>{{ t.tier or '—' }}</td><td class="num">{{ t.raids or '—' }}</td><td class="num">{{ t.kills or '—' }}</td>
+            <td class="num">{{ t.parse|pct0 if t.parse is not none else '—' }}</td><td>{{ t.first or '—' }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+
+    {% if p.mplus_best %}
+    <details class="drop">
+      <summary>Mythic+ <span class="muted">· {{ p.mplus_score|round(0)|int }} score{% if p.mplus_role %} as {{ p.mplus_role }}{% endif %}</span></summary>
+      <table class="mini">
+        <thead><tr><th>Dungeon</th><th class="num">Key</th><th class="num">Upgrades</th></tr></thead>
+        <tbody>
+          {% for r in p.mplus_best[:5] %}
+          <tr><td>{{ r.dungeon }}</td><td class="num">+{{ r.level }}</td><td class="num">{{ '+' * (r.upgrades or 0) or '—' }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+
+    <details class="prompt">
+      <summary>Portrait prompts <span class="muted">· {{ p.portrait_prompts|length }} frames</span></summary>
+      <p class="muted hint">Frame 1 is the hero shot: standing at arms in their transmog, weapons drawn. Generate all five,
+        drop them in as <code>{{ p.frames[0] if p.frames else 'members/' ~ p.slug ~ '/1.webp' }}</code> … <code>5.webp</code>, and this card animates.</p>
+      {% for f in p.portrait_prompts %}
+      <div class="prompt-frame">
+        <div class="prompt-label"><b>{{ loop.index }}. {{ f.label }}</b><button class="btn secondary copy" type="button" data-label="Copy">Copy</button></div>
+        <textarea readonly rows="5" onclick="this.select()">{{ f.prompt }}</textarea>
+      </div>
+      {% endfor %}
+      <button class="btn secondary copy-all" type="button">Copy all five</button>
+    </details>
+  </div>
+  {% endfor %}
+</div>
+<p class="muted" style="margin-top:1rem">Portraits are Blizzard's own character renders, so they update when the player changes transmog.
+  The prompts name their real weapons and armour, which is what makes the generated picture look like them.</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Copy buttons: one per frame, plus "copy all".
+document.querySelectorAll(".prompt .copy").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const text = btn.closest(".prompt-frame").querySelector("textarea").value;
+    copy(btn, text, "Copy");
+  });
+});
+document.querySelectorAll(".prompt .copy-all").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const parts = [...btn.closest(".prompt").querySelectorAll(".prompt-frame")].map((f) =>
+      f.querySelector(".prompt-label b").textContent + "\n" + f.querySelector("textarea").value);
+    copy(btn, parts.join("\n\n"), "Copy all five");
+  });
+});
+function copy(btn, text, label) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = "Copied";
+    setTimeout(() => (btn.textContent = label), 1500);
+  }).catch(() => { btn.textContent = "Select it manually"; });
+}
+
+// Frame animation. Generated frames are optional: if they 404 the card keeps the Blizzard render.
+const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+document.querySelectorAll(".portrait-stack").forEach((stack) => {
+  const frames = [...stack.querySelectorAll(".anim")];
+  if (!frames.length) return;
+  let loaded = 0, timer = null, i = 0;
+  frames.forEach((img) => {
+    img.addEventListener("load", () => { if (++loaded === frames.length) ready(); }, { once: true });
+    img.addEventListener("error", () => { frames.forEach((f) => f.remove()); }, { once: true });
+    img.src = img.dataset.src;
+  });
+
+  function ready() {
+    stack.classList.add("animated");
+    stack.querySelector(".frame-badge").hidden = false;
+    show(0);
+    stack.addEventListener("mouseenter", play);
+    stack.addEventListener("focus", play);
+    stack.addEventListener("mouseleave", stop);
+    stack.addEventListener("blur", stop);
+    // On touch, play once as the card scrolls into view - the hover joke, without a mouse.
+    if (window.IntersectionObserver && !REDUCED) {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (!e.isIntersecting) return;
+          play();
+          setTimeout(stop, 3200);
+          io.unobserve(stack);
+        });
+      }, { threshold: 0.6 });
+      io.observe(stack);
+    }
+  }
+  function show(n) {
+    i = ((n % frames.length) + frames.length) % frames.length;
+    frames.forEach((f, k) => (f.hidden = k !== i));
+    const base = stack.querySelector(".base");
+    if (base) base.style.visibility = "hidden";
+  }
+  function play() { if (REDUCED || timer) return; timer = setInterval(() => show(i + 1), 620); }
+  function stop() { clearInterval(timer); timer = null; show(0); }
+});
+</script>
+{% endblock %}

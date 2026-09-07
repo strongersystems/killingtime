@@ -265,6 +265,13 @@ class FakeRIO:
             raise RaiderIOError("bad expansion")
         return RIO_STATIC[expansion_id]
 
+    def character_profile(self, region, realm, name, fields="gear,guild"):
+        self.requests_made += 1
+        from killingtime.raiderio import RaiderIOError
+        if name not in CHARACTERS:
+            raise RaiderIOError(f"character {name} not found")
+        return CHARACTERS[name]
+
     def mythic_plus_static_data(self, expansion_id):
         self.requests_made += 1
         from killingtime.raiderio import RaiderIOError
@@ -278,6 +285,30 @@ class FakeRIO:
         if page > 0:
             return []
         return RIO_RANKINGS.get((raid, difficulty), [])
+
+
+def _character(name, race, gender, cls, spec, role, ilvl, mainhand, offhand=None) -> dict:
+    items = {"head": {"name": f"{cls} Helm of Consequence", "item_level": ilvl},
+             "chest": {"name": f"{cls} Breastplate of Mild Regret", "item_level": ilvl},
+             "mainhand": {"name": mainhand, "item_level": ilvl}}
+    if offhand:
+        items["offhand"] = {"name": offhand, "item_level": ilvl}
+    return {
+        "name": name, "race": race, "gender": gender, "class": cls,
+        "active_spec_name": spec, "active_spec_role": role,
+        "thumbnail_url": f"https://render.worldofwarcraft.com/eu/character/draenor/1/{len(name)}-avatar.jpg",
+        "profile_url": f"https://raider.io/characters/eu/draenor/{name}",
+        "guild": {"name": "Killing Time"},
+        "gear": {"item_level_equipped": ilvl, "items": items},
+    }
+
+
+CHARACTERS = {
+    "Tagrik": _character("Tagrik", "Orc", "male", "Warrior", "Arms", "DPS", 318.5, "Bonecleaver of Poor Decisions"),
+    "Elelena": _character("Elelena", "Blood Elf", "female", "Mage", "Frost", "DPS", 316.0, "Staff of Persistent Optimism"),
+    "Bubonic": _character("Bubonic", "Undead", "male", "DeathKnight", "Blood", "TANK", 320.0, "Runeblade of Standing Still"),
+    "Sixer": _character("Sixer", "Draenei", "female", "Priest", "Holy", "HEALING", 315.5, "Mace of Quiet Suffering", "Tome of Unread Whispers"),
+}
 
 
 @pytest.fixture
