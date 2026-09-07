@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "killingtime-progress",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-28",
+  "observability": { "enabled": true },
+  "vars": {
+    "PUBLIC_URL": "https://progress.killingtime.fyi",
+    "GUILD_NAME": "Killing Time",
+    "GUILD_REALM": "Draenor",
+    "GUILD_REGION": "EU",
+    "RIVAL_GUILDS": "Internet Diff@draenor/eu; Advance@draenor/eu; Incentive@draenor/eu",
+    "ASK_MODEL": "claude-opus-5",
+    "ASK_EFFORT": "high"
+  },
+  "containers": [
+    {
+      "class_name": "KTContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "basic"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "KT_CONTAINER", "class_name": "KTContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["KTContainer"] }],
+  "triggers": { "crons": ["15 */2 * * *"] },
+  "workers_dev": true
+}

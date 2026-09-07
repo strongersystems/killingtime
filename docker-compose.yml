@@ -4,6 +4,7 @@ services:
     env_file: .env
     environment:
       KT_DB_PATH: /data/killingtime.db
+      KT_SYNC_EVERY: "60"
     ports:
       - "8000:8000"
     volumes:

@@ -81,12 +81,18 @@ class AskRequest(BaseModel):
 
 def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None = None) -> FastAPI:
     settings = settings or get_settings()
-    conn = conn or connect(settings.kt_db_path)
+    if conn is None:
+        from ..state import restore_if_missing
+
+        restore_if_missing(settings)
+        conn = connect(settings.kt_db_path)
     app = FastAPI(title="Killing Time - Raid Progress", version=__version__)
     app.state.settings = settings
     app.state.conn = conn
     app.state.sync_manager = SyncManager(settings, settings.kt_db_path)
     app.state.asker = None
+    if settings.kt_auto_sync and conn.execute("SELECT COUNT(*) AS c FROM reports").fetchone()["c"] == 0:
+        threading.Timer(3.0, app.state.sync_manager.start).start()
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.filters["date"] = lambda ms: metrics.ms_to_date(ms) or "-"

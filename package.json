@@ -1,0 +1,19 @@
+{
+  "name": "killingtime-progress-worker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cloudflare Worker + Container wrapper for the Killing Time raid progress app",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "*",
+    "typescript": "^5",
+    "wrangler": "^4"
+  }
+}

@@ -552,6 +552,10 @@ def run_sync(
             stats.rio_requests = rio.requests_made
         set_meta(conn, "last_sync", str(now_ms()))
         conn.commit()
+        from .state import configured, persist
+
+        if configured(settings):
+            progress("snapshot uploaded" if persist(settings) else "warning: snapshot upload failed")
     except Exception as exc:  # noqa: BLE001 - we want the log row to capture any failure
         status = "error"
         stats.warn(f"sync failed: {exc}", progress)

@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     kt_host: str = "127.0.0.1"
     kt_port: int = 8000
 
+    # Cloudflare Containers: snapshot persistence through the Worker, and auto-sync on an empty database.
+    kt_state_url: str = ""
+    kt_state_secret: str = ""
+    kt_auto_sync: bool = False
+
     @field_validator("ask_effort")
     @classmethod
     def _effort(cls, v: str) -> str:
