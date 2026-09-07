@@ -961,6 +961,12 @@ def roster(conn: sqlite3.Connection, zone_id: int, difficulty: int | None, team:
     return {"players": rows, "total_raids": att["total_raids"], "perf": perf}
 
 
+def _title(slug: str) -> str:
+    """Raider.IO raid slug -> a readable name ("liberation-of-undermine" -> "Liberation of Undermine")."""
+    small = {"of", "the", "and", "in"}
+    return " ".join(w if w in small and i else w.capitalize() for i, w in enumerate(slug.split("-")))
+
+
 def _slug(name: str) -> str:
     import re as _re
     import unicodedata as _ud
@@ -1057,6 +1063,26 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
     ):
         per_boss.setdefault(r["player_name"], []).append(r)
 
+    # The best parse of their career, wherever and whenever it happened - a peak from two tiers ago still counts.
+    career_best: dict[str, dict] = {}
+    for r in _rows(
+        conn,
+        """SELECT p.player_name, p.rank_percent AS pct, p.encounter_name, p.difficulty, z.name AS zone_name,
+                  date(p.start_time / 1000, 'unixepoch') AS on_date
+           FROM v_parses p JOIN zones z ON z.id = p.zone_id
+           WHERE p.rank_percent IS NOT NULL
+           ORDER BY p.player_name, p.rank_percent DESC""",
+    ):
+        career_best.setdefault(r["player_name"], r)   # the ordering makes the first row per player the best
+    career_totals = {
+        r["player_name"]: r for r in _rows(
+            conn,
+            """SELECT player_name, COUNT(*) AS parses, AVG(rank_percent) AS avg_pct,
+                      COUNT(DISTINCT encounter_id) AS bosses
+               FROM v_parses WHERE rank_percent IS NOT NULL GROUP BY player_name""",
+        )
+    }
+
     cards = []
     for p in data["players"]:
         if (p["raids"] or 0) < min_raids and not p["kills"]:
@@ -1086,6 +1112,21 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
         card["achievement_points"] = c.get("achievement_points")
         prog = _json.loads(c["raid_progression"]) if c.get("raid_progression") else {}
         card["personal_progress"] = prog.get(zone_slug) if zone_slug else None
+        # Everything Raider.IO knows they have killed, tier by tier, not only the one we are looking at.
+        card["armory_raids"] = [
+            {"raid": _title(slug), "slug": slug, "summary": v.get("summary"),
+             "mythic": v.get("mythic_bosses_killed") or 0, "heroic": v.get("heroic_bosses_killed") or 0,
+             "total": v.get("total_bosses") or 0}
+            for slug, v in prog.items() if isinstance(v, dict) and (v.get("mythic_bosses_killed") or v.get("heroic_bosses_killed"))
+        ]
+        cb = career_best.get(p["player"])
+        card["career_best"] = ({"pct": cb["pct"], "boss": cb["encounter_name"], "zone": cb["zone_name"],
+                                "difficulty": DIFFICULTIES.get(cb["difficulty"], ""), "date": cb["on_date"]}
+                               if cb else None)
+        ct = career_totals.get(p["player"])
+        card["career_parses"] = ct["parses"] if ct else 0
+        card["career_avg"] = round(ct["avg_pct"], 1) if ct and ct["avg_pct"] is not None else None
+        card["career_bosses"] = ct["bosses"] if ct else 0
         card["alts"] = alts.get(p["player"], [])
         card["stats"] = flavour.stats(card)
         card["bio"] = flavour.bio(card)

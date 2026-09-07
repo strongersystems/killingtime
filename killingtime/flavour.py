@@ -20,12 +20,15 @@ def _article(word: str) -> str:
     return "an" if word[:1].lower() in "aeiou" else "a"
 
 
+def _hash(name: str, salt: str = "") -> int:
+    return hashlib.sha256(f"{name}|{salt}".encode()).digest()[0]
+
+
 def _pick(options: list[str], name: str, salt: str = "") -> str:
     """Stable choice: the same player always gets the same line."""
     if not options:
         return ""
-    digest = hashlib.sha256(f"{name}|{salt}".encode()).digest()
-    return options[digest[0] % len(options)]
+    return options[_hash(name, salt) % len(options)]
 
 
 def _attendance_line(p: dict[str, Any]) -> str:
@@ -112,20 +115,37 @@ def _role_line(p: dict[str, Any]) -> str:
     return _pick(ROLE_LINES.get(p.get("role") or "dps", ROLE_LINES["dps"]), p["player"], "role")
 
 
-def _highlight_line(p: dict[str, Any]) -> str:
-    best, worst = p.get("best_boss"), p.get("worst_boss")
-    bits = []
-    if best and best.get("pct") is not None:
-        bits.append(_pick([
-            f"Peaked at {round(best['pct'])} on {best['boss']}, a screenshot that still exists somewhere.",
-            f"Career highlight: {round(best['pct'])} percentile on {best['boss']}, brought up at every opportunity.",
-        ], p["player"], "best"))
-    if worst and worst.get("pct") is not None and (not best or worst["boss"] != best["boss"]):
-        bits.append(_pick([
-            f"Has an ongoing disagreement with {worst['boss']}, who is winning.",
-            f"{worst['boss']} remains the nemesis, and the logs are not kind about it.",
-        ], p["player"], "worst"))
-    return " ".join(bits)
+def _best_line(p: dict[str, Any]) -> str:
+    best = p.get("best_boss")
+    if not best or best.get("pct") is None:
+        return ""
+    pct, boss = round(best["pct"]), best["boss"]
+    return _pick([
+        f"Peaked at {pct} on {boss}, a screenshot that still exists somewhere.",
+        f"Career highlight: {pct} percentile on {boss}, brought up at every opportunity.",
+        f"Their best night is {boss} at {pct}, and they can tell you exactly what they pressed.",
+        f"{boss} is where it clicks: {pct} percentile, achieved once, referenced forever.",
+        f"Once put up a {pct} on {boss}. The guild has heard about it. Twice.",
+        f"Owns exactly one {pct} parse, on {boss}, and has built a personality around it.",
+    ], p["player"], "best")
+
+
+def _worst_line(p: dict[str, Any]) -> str:
+    """Only some cards carry a nemesis line - if everyone had one they would all read the same."""
+    worst, best = p.get("worst_boss"), p.get("best_boss")
+    if not worst or worst.get("pct") is None or (best and worst["boss"] == best["boss"]):
+        return ""
+    if _hash(p["player"], "worst-gate") % 3 == 0:   # roughly a third of the roster
+        return ""
+    boss, pct = worst["boss"], round(worst["pct"])
+    return _pick([
+        f"Has an ongoing disagreement with {boss}, who is winning.",
+        f"{boss} remains the nemesis, and the logs are not kind about it.",
+        f"Whatever {boss} does, it does it to them first: {pct} percentile and a lot of excuses.",
+        f"Every guild has one boss they cannot parse on. Theirs is {boss}, at a stately {pct}.",
+        f"Politely requests we skip {boss}, where the logs read {pct} and the memories read worse.",
+        f"{boss} is the reason they do not link their own logs unprompted.",
+    ], p["player"], "worst")
 
 
 def _tenure_line(p: dict[str, Any]) -> str:
@@ -185,18 +205,103 @@ def _alt_line(p: dict[str, Any]) -> str:
     return f"Keeps {len(alts)} alts on standby ({', '.join(alts)}), one of which is definitely better geared than the main."
 
 
-def bio(player: dict[str, Any]) -> list[str]:
-    """Four to seven short, mildly comical sentences, every one of them built from the player's own numbers."""
+def _career_line(p: dict[str, Any]) -> str:
+    """Their all-time peak, which is often not in this tier at all."""
+    cb = p.get("career_best")
+    if not cb or cb.get("pct") is None:
+        return ""
+    pct, boss, zone = round(cb["pct"]), cb["boss"], cb.get("zone") or "somewhere"
+    best = p.get("best_boss") or {}
+    if best.get("pct") is not None and round(best["pct"]) >= pct:
+        return ""   # this tier is already their peak; _best_line has it covered
+    return _pick([
+        f"All-time peak: {pct} on {boss} back in {zone}. They have not stopped chasing it since.",
+        f"Their high-water mark is a {pct} on {boss} in {zone}, and it comes up whenever the meter does.",
+        f"Career best is still {boss} in {zone} at {pct} percentile. Every tier since has been a rebuilding year.",
+        f"Has, on record, a {pct} parse on {boss} in {zone}. The rest is just consistency.",
+    ], p["player"], "career")
+
+
+def _armory_line(p: dict[str, Any]) -> str:
+    """What Raider.IO says they have cleared across the expansion, not just this tier."""
+    raids = [r for r in (p.get("armory_raids") or []) if r.get("summary")]
+    if not raids:
+        return ""
+    myth = [r for r in raids if r["mythic"]]
+    if myth:
+        best = max(myth, key=lambda r: r["mythic"])
+        return _pick([
+            f"The armory carries {best['mythic']}/{best['total']} Mythic in {best['raid']}, across {len(raids)} raids of history.",
+            f"{len(raids)} raids on the armory, the pick of them {best['mythic']}/{best['total']} Mythic in {best['raid']}.",
+            f"Has {best['mythic']} Mythic bosses in {best['raid']} to their name, and the receipts to prove it.",
+        ], p["player"], "armory")
+    best = max(raids, key=lambda r: r["heroic"])
+    return f"Armory history runs to {len(raids)} raids, topping out at {best['heroic']}/{best['total']} Heroic in {best['raid']}."
+
+
+def _volume_line(p: dict[str, Any]) -> str:
+    """How much of them is actually in the logs."""
+    parses, bosses = p.get("career_parses") or 0, p.get("career_bosses") or 0
+    if parses < 5:
+        return ""
+    return _pick([
+        f"{parses} logged kills across {bosses} different bosses, every one of them a matter of public record.",
+        f"The logs hold {parses} of their kills on {bosses} bosses. There is nowhere to hide.",
+        f"{parses} parses deep on {bosses} bosses, which is either dedication or a lack of alternatives.",
+    ], p["player"], "volume")
+
+
+# Hand-written for the people the guild would riot about. Everything here is still theirs; it is just kinder.
+def _findruid(p: dict[str, Any]) -> list[str]:
+    h = p.get("history") or {}
+    cb = p.get("career_best") or {}
     lines = [
-        _role_line(player),
-        _tenure_line(player),
-        _attendance_line(player),
-        _parse_line(player),
-        _highlight_line(player),
-        _progress_line(player),
-        _mplus_line(player),
-        _alt_line(player),
+        "S-tier. The rest of the roster is measured against Findruid, and the measurement is rarely flattering "
+        "to the rest of the roster.",
+        "The best player in Killing Time, and the least interested in saying so. Ask anyone who has raided behind "
+        "them and watch the argument end before it starts.",
     ]
+    if p.get("avg") is not None:
+        lines.append(f"Averages a {round(p['avg'])} percentile while also doing the mechanic nobody else remembered, "
+                     "which is the part the meter never shows.")
+    if cb.get("pct") is not None:
+        lines.append(f"Peak on record: {round(cb['pct'])} on {cb['boss']}{' in ' + cb['zone'] if cb.get('zone') else ''} - "
+                     "a parse that other people screenshot, and Findruid has to be reminded happened.")
+    if h.get("total_raids"):
+        lines.append(f"{h['total_raids']} raid nights across {h.get('tier_count') or 0} tiers"
+                     f"{', since ' + h['first_tier'] if h.get('first_tier') else ''}, and the answer to 'who covers "
+                     "that?' has been the same the entire time.")
+    if p.get("pct") is not None:
+        lines.append(f"Attendance sits at {round(p['pct'])}%, because progression nights are simply easier when the "
+                     "druid is there and everybody knows it.")
+    lines.append("Moonfire, brainstem, immaculate cooldown usage, and the patience of somebody who has explained the "
+                 "same soak three times without raising their voice. Guild treasure.")
+    return lines
+
+
+LEGENDS = {"findruid": _findruid}
+
+
+def bio(player: dict[str, Any]) -> list[str]:
+    """Short, mildly comical sentences, every one built from the player's own numbers.
+
+    The middle of the bio is stably shuffled per player: with fifty raiders on one page, the same lines in the same
+    order would read like a mail merge. Line one is always the role joke, and the alts note is always last."""
+    name = player["player"]
+    legend = LEGENDS.get(str(player.get("slug") or name).lower())
+    if legend:
+        lines = legend(player)
+        alt = _alt_line(player)
+        return [*lines, alt] if alt else lines
+
+    middle = [
+        _tenure_line(player), _attendance_line(player), _parse_line(player), _best_line(player),
+        _worst_line(player), _career_line(player), _armory_line(player), _volume_line(player),
+        _progress_line(player), _mplus_line(player),
+    ]
+    middle = [line for line in middle if line]
+    middle.sort(key=lambda line: _hash(name, line[:24]))   # stable per player, different between players
+    lines = [_role_line(player), *middle[:6], _alt_line(player)]
     return [line for line in lines if line]
 
 
