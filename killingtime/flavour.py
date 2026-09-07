@@ -30,6 +30,7 @@ def _pick(options: list[str], name: str, salt: str = "") -> str:
 
 def _attendance_line(p: dict[str, Any]) -> str:
     pct, raids = p.get("pct"), p.get("raids") or 0
+    pct = round(pct) if pct is not None else None   # "80%", never "80.0%"
     if pct is None:
         return "Turns up in the logs without ever appearing on the attendance sheet, which is its own talent."
     if pct >= 95:

@@ -44,6 +44,10 @@ export interface Env {
 const CHUNK = 1024 * 1024;
 const PROTECTED = ["/ask", "/api/ask", "/sync", "/api/sync", "/status"];
 const SECRET_HEADER = "X-KT-Secret";
+const MIME: Record<string, string> = {
+  webp: "image/webp", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  svg: "image/svg+xml", css: "text/css; charset=utf-8", js: "text/javascript; charset=utf-8",
+};
 
 export class KTContainer extends Container<Env> {
   defaultPort = 8000;
@@ -211,6 +215,8 @@ async function servePublicSite(request: Request, env: Env, url: URL): Promise<Re
     if (!asset.ok) return new Response("not found", { status: 404 });
     const headers = new Headers(asset.headers);
     headers.set("Cache-Control", "public, max-age=86400");
+    const type = MIME[url.pathname.slice(url.pathname.lastIndexOf(".") + 1).toLowerCase()];
+    if (type) headers.set("Content-Type", type);   // the container serves .webp as octet-stream
     return new Response(asset.body, { status: asset.status, headers });
   }
   // Page name -> stored page. "/" is the front page; "/team" is Meet the Team.
