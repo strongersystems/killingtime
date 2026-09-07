@@ -47,7 +47,7 @@ def test_drop_zone_removes_everything(synced):
 def test_reports_assigned_to_teams(synced):
     conn, *_ = synced
     teams = {r["report_code"]: r["team"] for r in conn.execute("SELECT report_code, team FROM report_teams")}
-    assert teams == {"C1": "6 Hour Team", "C2": "CE Team", "C3": "CE Team"}
+    assert teams == {"C1": "6 Hour Team", "C2": "CE Team", "C2B": "CE Team", "C3": "CE Team"}
     assert metrics.teams_seen(conn) == ["6 Hour Team", "CE Team"]
     # previous-tier reports have no attendance -> unassigned, so they only show in the guild view
     assert metrics.tiers(conn, "CE Team")[0]["id"] == 46 and len(metrics.tiers(conn, "CE Team")) == 1
@@ -101,9 +101,11 @@ def test_peer_comparison(synced):
 def test_parses_synced_and_summarised(synced):
     conn, wcl, rio, settings = synced
     # every kill fight in the current + previous tier got tank/dps rows from the dps query and healer rows from hps
-    kills = conn.execute("SELECT COUNT(*) FROM fights WHERE kill = 1").fetchone()[0]
+    kills = conn.execute("SELECT COUNT(*) FROM fights WHERE kill = 1 AND canonical = 1").fetchone()[0]
     assert conn.execute("SELECT COUNT(*) FROM parses").fetchone()[0] == kills * 5
     assert conn.execute("SELECT COUNT(*) FROM reports WHERE rankings_synced_at IS NULL").fetchone()[0] == 0
+    # the kill on 2026-08-30 appears in both C2 and C2B but its rankings were fetched once, for the canonical copy
+    assert conn.execute("SELECT COUNT(*) FROM parses WHERE report_code IN ('C2', 'C2B')").fetchone()[0] == 5
     # a second sync fetches nothing new
     before = wcl.queries_made
     run_sync(conn, settings, wcl, rio, full=False, progress=lambda m: None)
@@ -118,7 +120,7 @@ def test_parses_synced_and_summarised(synced):
     with_pugs = metrics.performance(conn, 46, 4, "6 Hour Team", include_pugs=True)
     assert with_pugs["players"][0]["player"] == "Puggy"
     assert metrics.performance(conn, 46, 5, "6 Hour Team")["parses"] == 0
-    assert metrics.parse_coverage(conn, 46)["synced"] == 3
+    assert metrics.parse_coverage(conn, 46)["synced"] == 4
 
 
 def test_public_site(synced, tmp_path):
@@ -177,6 +179,29 @@ def test_web_pages_with_teams(synced):
     assert ros["total_raids"] == 1 and ros["players"][0]["pct"] == 100.0
     pub = client.get("/api/public").json()
     assert pub["current"]["name"] == "The Venomous Abyss"
+
+
+def test_dedupe_keeps_kill_and_longer_record(tmp_path):
+    from killingtime.sync import dedupe_fights
+
+    conn = connect(str(tmp_path / "d.db"))
+    conn.execute("INSERT INTO expansions VALUES (1, 'x')")
+    conn.execute("INSERT INTO zones(id, name, expansion_id) VALUES (1, 'z', 1)")
+    conn.execute("INSERT INTO encounters VALUES (10, 1, 'Boss', 1, NULL)")
+    conn.execute("INSERT INTO guilds(id, name, realm_slug, region, is_home) VALUES (1, 'g', 'r', 'eu', 1)")
+    for code in ("A", "B"):
+        conn.execute("INSERT INTO reports(code, guild_id, zone_id, start_time, end_time) VALUES (?, 1, 1, 0, 10)", (code,))
+    # A logged the wipe as 99 s, B (clock 30 s ahead) as 90 s; on the kill pull B recorded the kill, A dropped combat log early
+    rows = [("A", 1, 10, 5, 0, 1000, 100_000), ("B", 1, 10, 5, 0, 30_000, 120_000),
+            ("A", 2, 10, 5, 0, 200_000, 500_000), ("B", 2, 10, 5, 1, 230_000, 520_000),
+            ("A", 3, 10, 5, 0, 900_000, 950_000)]  # a genuinely separate later pull, only in A
+    conn.executemany("INSERT INTO fights(report_code, fight_id, encounter_id, difficulty, kill, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.commit()
+    assert dedupe_fights(conn) == 2
+    canon = {(r[0], r[1]): r[2] for r in conn.execute("SELECT report_code, fight_id, canonical FROM fights")}
+    assert canon == {("A", 1): 1, ("B", 1): 0, ("A", 2): 0, ("B", 2): 1, ("A", 3): 1}  # longer record wins; the kill always wins
+    assert tuple(conn.execute("SELECT COUNT(*), SUM(kill) FROM v_pulls").fetchone()) == (3, 1)
+    assert dedupe_fights(conn) == 2  # idempotent
 
 
 def test_migration_adds_columns(tmp_path):

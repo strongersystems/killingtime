@@ -36,9 +36,10 @@ ZONES = [
 EXPANSIONS = [{"id": 7, "name": "Midnight"}, {"id": 6, "name": "The War Within"}]
 
 
-def make_report(code: str, zone_id: int, date: str, pulls: list[tuple[int, int, bool, float]]) -> tuple[dict, list[dict]]:
-    """pulls: (encounter_id, difficulty, kill, fight_pct). Fights are 5 minutes each, back to back."""
-    start = ms(date)
+def make_report(code: str, zone_id: int, date: str, pulls: list[tuple[int, int, bool, float]], offset_s: int = 0) -> tuple[dict, list[dict]]:
+    """pulls: (encounter_id, difficulty, kill, fight_pct). Fights are 5 minutes each, back to back.
+    ``offset_s`` shifts the whole report, to fake a second person logging the same raid."""
+    start = ms(date) + offset_s * 1000
     fights = []
     t = 0
     for i, (enc, diff, kill, pct) in enumerate(pulls, start=1):
@@ -66,6 +67,8 @@ CUR = [
     make_report("C1", 46, "2026-08-23", [(3201, 4, True, 0.0), (3202, 4, False, 30.0), (3202, 4, True, 0.0), (3203, 4, True, 0.0)]),
     make_report("C2", 46, "2026-08-30", [(3201, 5, False, 60.0), (3201, 5, False, 25.0), (3201, 5, True, 0.0), (3202, 5, False, 80.0)]),
     make_report("C3", 46, "2026-09-02", [(3202, 5, False, 66.0), (3202, 5, False, 41.2), (3202, 5, False, 38.0)]),
+    # A second logger's copy of C2 (clock 20 s behind, one wipe cut short): every pull is a duplicate and must not count twice.
+    make_report("C2B", 46, "2026-08-30", [(3201, 5, False, 60.0), (3201, 5, False, 25.0), (3201, 5, True, 0.0), (3202, 5, False, 80.0)], offset_s=-20),
 ]
 REPORTS = {r["code"]: r for r, _ in PREV + CUR}
 FIGHTS = {r["code"]: f for r, f in PREV + CUR}
@@ -76,6 +79,8 @@ ATTENDANCE = {
           "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Bubonic", "type": "DeathKnight", "presence": 1},
                       {"name": "Sixer", "type": "Priest", "presence": 1}]},
          {"code": "C2", "startTime": ms("2026-08-30"), "zone": {"id": 46},
+          "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Elelena", "type": "Mage", "presence": 1}]},
+         {"code": "C2B", "startTime": ms("2026-08-30") - 20_000, "zone": {"id": 46},
           "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Elelena", "type": "Mage", "presence": 1}]},
          {"code": "C3", "startTime": ms("2026-09-02"), "zone": {"id": 46},
           "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Elelena", "type": "Mage", "presence": 1},

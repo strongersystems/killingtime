@@ -289,6 +289,45 @@ def sync_reports(
     return sorted(touched)
 
 
+DUPLICATE_WINDOW_MS = 60_000
+
+
+def dedupe_fights(conn: sqlite3.Connection, window_ms: int = DUPLICATE_WINDOW_MS) -> int:
+    """Flag duplicate pulls: the same boss, at the same difficulty, starting within ``window_ms`` (or overlapping) in a
+    *different* report is the same pull logged by a second person. The longer record (or the one that recorded the kill)
+    stays canonical. Returns the number of fights marked as duplicates."""
+    rows = conn.execute(
+        """SELECT report_code, fight_id, encounter_id, difficulty, start_time, end_time, kill, canonical
+           FROM fights ORDER BY encounter_id, difficulty, start_time, end_time DESC"""
+    ).fetchall()
+    flags: dict[tuple[str, int], int] = {}
+    kept: dict | None = None
+    key_prev = None
+    for r in rows:
+        key = (r["encounter_id"], r["difficulty"])
+        if key != key_prev:
+            kept, key_prev = None, key
+        cur = dict(r)
+        if kept and cur["report_code"] != kept["report_code"] and (
+            cur["start_time"] - kept["start_time"] <= window_ms or cur["start_time"] < kept["end_time"]
+        ):
+            cur_len, kept_len = cur["end_time"] - cur["start_time"], kept["end_time"] - kept["start_time"]
+            if (cur["kill"] and not kept["kill"]) or (cur["kill"] == kept["kill"] and cur_len > kept_len):
+                flags[(kept["report_code"], kept["fight_id"])] = 0
+                flags[(cur["report_code"], cur["fight_id"])] = 1
+                kept = cur
+            else:
+                flags[(cur["report_code"], cur["fight_id"])] = 0
+            continue
+        flags[(cur["report_code"], cur["fight_id"])] = 1
+        kept = cur
+    changes = [(flag, code, fid) for (code, fid), flag in flags.items()]
+    with transaction(conn):
+        conn.executemany("UPDATE fights SET canonical = ? WHERE report_code = ? AND fight_id = ? AND canonical != ?",
+                         [(f, c, i, f) for f, c, i in changes])
+    return sum(1 for f in flags.values() if f == 0)
+
+
 def sync_zone_rankings(conn: sqlite3.Connection, wcl: WCLClient, guild_id: int, wcl_guild_id: int, zone_ids: list[int], stats: SyncStats, progress: Progress) -> None:
     for zid in zone_ids:
         try:
@@ -384,16 +423,16 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
         for r in conn.execute(
             f"""SELECT r.code FROM reports r
                 WHERE r.zone_id IN ({placeholders}) AND r.rankings_synced_at IS NULL
-                  AND EXISTS (SELECT 1 FROM fights f WHERE f.report_code = r.code AND f.kill = 1 AND f.difficulty IN (3,4,5))
+                  AND EXISTS (SELECT 1 FROM fights f WHERE f.report_code = r.code AND f.kill = 1 AND f.canonical = 1 AND f.difficulty IN (3,4,5))
                 ORDER BY r.start_time DESC LIMIT ?""",
             (*zone_ids, limit),
         )
     ]
-    # Reports with no kills never get rankings: mark them done so we don't look again.
+    # Reports with no (canonical) kills never need rankings: mark them done so we don't look again.
     conn.execute(
         f"""UPDATE reports SET rankings_synced_at = ? WHERE zone_id IN ({placeholders}) AND rankings_synced_at IS NULL
             AND fights_synced_at IS NOT NULL
-            AND NOT EXISTS (SELECT 1 FROM fights f WHERE f.report_code = reports.code AND f.kill = 1 AND f.difficulty IN (3,4,5))""",
+            AND NOT EXISTS (SELECT 1 FROM fights f WHERE f.report_code = reports.code AND f.kill = 1 AND f.canonical = 1 AND f.difficulty IN (3,4,5))""",
         (now_ms(), *zone_ids),
     )
     conn.commit()
@@ -655,6 +694,9 @@ def run_sync(
             gid = sync_home_guild_wcl(conn, wcl, settings, stats, progress)
             wcl_gid = conn.execute("SELECT wcl_id FROM guilds WHERE id = ?", (gid,)).fetchone()["wcl_id"]
             touched = sync_reports(conn, wcl, gid, wcl_gid, full, stats, progress)
+            dups = dedupe_fights(conn)
+            if dups:
+                progress(f"duplicate pulls from second loggers hidden: {dups}")
             active_zones = [
                 r["zone_id"]
                 for r in conn.execute(

@@ -246,13 +246,14 @@ def raid_nights(conn: sqlite3.Connection, zone_id: int, limit: int = 60, team: s
 
 def attendance_summary(conn: sqlite3.Connection, zone_id: int, team: str | None = None) -> dict[str, Any]:
     _, _, tf, tp = _scope(team)
+    # Raids are counted by date: two people logging the same night produce two reports of one raid.
     total_raids = conn.execute(
-        f"SELECT COUNT(DISTINCT report_code) AS c FROM v_attendance WHERE zone_id = ?{tf}", (zone_id, *tp)
+        f"SELECT COUNT(DISTINCT raid_date) AS c FROM v_attendance WHERE zone_id = ?{tf}", (zone_id, *tp)
     ).fetchone()["c"]
     players = _rows(
         conn,
-        f"""SELECT player_name, player_class, COUNT(DISTINCT report_code) AS raids,
-                   ROUND(100.0 * COUNT(DISTINCT report_code) / ?, 1) AS pct
+        f"""SELECT player_name, player_class, COUNT(DISTINCT raid_date) AS raids,
+                   ROUND(100.0 * COUNT(DISTINCT raid_date) / ?, 1) AS pct
             FROM v_attendance WHERE zone_id = ? AND presence = 1{tf}
             GROUP BY player_name ORDER BY raids DESC, player_name""",
         (max(total_raids, 1), zone_id, *tp),
@@ -512,8 +513,21 @@ def peer_comparison(
         if len(peers) >= min_peers:
             break
         band += 1
-    # Closest kill counts first, then by realm rank, capped.
-    peers.sort(key=lambda c: (abs(c["killed"] - our_kills), c["realm_rank"] or 10**6))
+    # Closest kill counts first, then the guilds ranked nearest to us. Our own rank only describes the team when the
+    # team's progress is the guild's (Raider.IO knows guilds, not teams); otherwise use the middle of the band.
+    home_prog = by_guild_home = {p["encounter_slug"]: p for p in _rows(
+        conn, "SELECT encounter_slug, is_defeated FROM rio_progress WHERE guild_id = ? AND raid_slug = ? AND difficulty = ?",
+        (home_id, raid_slug, difficulty))}
+    guild_kills = sum(1 for p in by_guild_home.values() if p["is_defeated"])
+    home_rank = conn.execute(
+        "SELECT realm_rank FROM rio_rankings WHERE guild_id = ? AND raid_slug = ? AND difficulty = ?", (home_id, raid_slug, difficulty)
+    ).fetchone()
+    ranks = sorted(c["realm_rank"] for c in peers if c["realm_rank"])
+    if home_rank and home_rank["realm_rank"] and (our_kills == guild_kills or not home_prog):
+        reference = home_rank["realm_rank"]
+    else:
+        reference = ranks[len(ranks) // 2] if ranks else 0
+    peers.sort(key=lambda c: (abs(c["killed"] - our_kills), abs((c["realm_rank"] or 10**6) - reference)))
     peers = peers[:max_peers]
 
     per_boss = []

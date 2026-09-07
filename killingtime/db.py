@@ -208,12 +208,15 @@ CREATE INDEX IF NOT EXISTS idx_parses_encounter ON parses(encounter_id, difficul
 # Columns added after the first release: (table, column, definition).
 MIGRATIONS: list[tuple[str, str, str]] = [
     ("reports", "rankings_synced_at", "INTEGER"),
+    # 0 when the same pull also appears in another report (two people logging the same raid); see sync.dedupe_fights.
+    ("fights", "canonical", "INTEGER NOT NULL DEFAULT 1"),
 ]
 
 VIEWS = """
 DROP VIEW IF EXISTS v_pulls;
 -- zone_id is the boss's zone, not the report's: a log can contain pulls from several raids (e.g. clearing an
 -- older tier on the same night), and each pull must count towards the tier the boss belongs to.
+-- Only canonical fights: when two people log the same raid, each pull appears in both reports and one copy is dropped.
 CREATE VIEW v_pulls AS
 SELECT
     f.report_code, f.fight_id, r.guild_id, e.zone_id, z.name AS zone_name,
@@ -227,7 +230,8 @@ FROM fights f
 JOIN reports r ON r.code = f.report_code
 JOIN encounters e ON e.id = f.encounter_id
 JOIN zones z ON z.id = e.zone_id
-LEFT JOIN report_teams t ON t.report_code = f.report_code;
+LEFT JOIN report_teams t ON t.report_code = f.report_code
+WHERE f.canonical = 1;
 
 DROP VIEW IF EXISTS v_first_kills;
 CREATE VIEW v_first_kills AS
@@ -324,7 +328,7 @@ FROM parses ps
 JOIN reports r ON r.code = ps.report_code
 JOIN encounters e ON e.id = ps.encounter_id
 JOIN zones z ON z.id = e.zone_id
-LEFT JOIN fights f ON f.report_code = ps.report_code AND f.fight_id = ps.fight_id
+JOIN fights f ON f.report_code = ps.report_code AND f.fight_id = ps.fight_id AND f.canonical = 1
 LEFT JOIN report_teams t ON t.report_code = ps.report_code;
 
 DROP VIEW IF EXISTS v_rio_progress;
@@ -345,7 +349,7 @@ TABLE_DOCS: dict[str, str] = {
     "encounters": "Bosses in each zone; ord is the boss order within the raid.",
     "guilds": "Every guild we know. is_home=1 is Killing Time; is_rival=1 are configured rivals; others come from the realm leaderboard.",
     "reports": "Warcraft Logs reports (one per raid night, usually) for the home guild.",
-    "fights": "One row per boss pull from our logs. kill=1 for kills. fight_pct is % of the encounter remaining on a wipe.",
+    "fights": "One row per boss pull from our logs. kill=1 for kills. fight_pct is % of the encounter remaining on a wipe. canonical=0 marks a duplicate of a pull logged by a second person; use v_pulls, which excludes them.",
     "v_pulls": "fights joined to encounter/zone names (zone_id is the boss's zone), with pull_date, duration_s and team (raid team name or NULL). Prefer this over fights.",
     "v_first_kills": "Per guild/zone/boss/difficulty: first kill time, pulls_to_kill (pulls up to and incl. the first kill; all pulls if not killed), wipes_before_kill, nights_to_kill, hours_to_kill, killed flag. Whole guild.",
     "v_team_first_kills": "Same as v_first_kills but per raid team (column team). Use when a question is about one team.",

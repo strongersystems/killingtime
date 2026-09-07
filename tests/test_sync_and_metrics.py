@@ -25,14 +25,18 @@ def test_sync_populates_tables(synced):
     conn, wcl, rio, settings = synced
     assert conn.execute("SELECT COUNT(*) FROM zones").fetchone()[0] == 2
     assert conn.execute("SELECT COUNT(*) FROM encounters").fetchone()[0] == 6
-    assert conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 7  # dungeon report ignored
+    assert conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 8  # dungeon report ignored, second logger kept
     # trash fights (encounterID 0) are dropped
     assert conn.execute("SELECT COUNT(*) FROM fights WHERE encounter_id = 0").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM fights").fetchone()[0] == 4 + 6 + 6 + 5 + 4 + 4 + 3
+    assert conn.execute("SELECT COUNT(*) FROM fights").fetchone()[0] == 4 + 6 + 6 + 5 + 4 + 4 + 3 + 4
+    # the second logger's four pulls are duplicates of C2's and are hidden from every metric
+    assert conn.execute("SELECT COUNT(*) FROM fights WHERE canonical = 0").fetchone()[0] == 4
+    assert conn.execute("SELECT COUNT(*) FROM v_pulls").fetchone()[0] == 4 + 6 + 6 + 5 + 4 + 4 + 3
+    assert conn.execute("SELECT COUNT(*) FROM v_pulls WHERE report_code IN ('C2', 'C2B')").fetchone()[0] == 4
     home = metrics.home_guild(conn)
     assert home["wcl_id"] == 637454 and home["faction"] == "horde" and home["is_home"] == 1
     # attendance rows (fixture only has attendance for the current tier)
-    assert conn.execute("SELECT COUNT(*) FROM attendance").fetchone()[0] == 8
+    assert conn.execute("SELECT COUNT(*) FROM attendance").fetchone()[0] == 10
     # the Mythic+ season zone (47) and its report were skipped
     assert conn.execute("SELECT COUNT(*) FROM zones WHERE id = 47").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM reports WHERE code = 'DUN2'").fetchone()[0] == 0
@@ -57,7 +61,7 @@ def test_incremental_sync_is_idempotent(synced):
     before = conn.execute("SELECT COUNT(*) FROM fights").fetchone()[0]
     stats = run_sync(conn, settings, wcl, rio, full=False, progress=lambda m: None)
     assert conn.execute("SELECT COUNT(*) FROM fights").fetchone()[0] == before
-    assert conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 7
+    assert conn.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 8
     assert stats.fights == 0  # nothing re-fetched: all reports already had fights_synced_at
 
 
