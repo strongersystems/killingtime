@@ -211,14 +211,16 @@ def _career_line(p: dict[str, Any]) -> str:
     if not cb or cb.get("pct") is None:
         return ""
     pct, boss, zone = round(cb["pct"]), cb["boss"], cb.get("zone") or "somewhere"
+    diff = cb.get("difficulty") or ""
+    where = f"{zone}" + (f", {diff}" if diff else "")
     best = p.get("best_boss") or {}
     if best.get("pct") is not None and round(best["pct"]) >= pct:
         return ""   # this tier is already their peak; _best_line has it covered
     return _pick([
-        f"All-time peak: {pct} on {boss} back in {zone}. They have not stopped chasing it since.",
-        f"Their high-water mark is a {pct} on {boss} in {zone}, and it comes up whenever the meter does.",
-        f"Career best is still {boss} in {zone} at {pct} percentile. Every tier since has been a rebuilding year.",
-        f"Has, on record, a {pct} parse on {boss} in {zone}. The rest is just consistency.",
+        f"All-time peak: {pct} on {boss} back in {where}. They have not stopped chasing it since.",
+        f"Their high-water mark is a {pct} on {boss} ({where}), and it comes up whenever the meter does.",
+        f"Career best is still {boss} at {pct} percentile ({where}). Every tier since has been a rebuilding year.",
+        f"Has, on record, a {pct} parse on {boss} ({where}). The rest is just consistency.",
     ], p["player"], "career")
 
 
@@ -265,7 +267,8 @@ def _findruid(p: dict[str, Any]) -> list[str]:
         lines.append(f"Averages a {round(p['avg'])} percentile while also doing the mechanic nobody else remembered, "
                      "which is the part the meter never shows.")
     if cb.get("pct") is not None:
-        lines.append(f"Peak on record: {round(cb['pct'])} on {cb['boss']}{' in ' + cb['zone'] if cb.get('zone') else ''} - "
+        where = ", ".join(x for x in (cb.get("zone"), cb.get("difficulty")) if x)
+        lines.append(f"Peak on record: {round(cb['pct'])} on {cb['boss']}{' (' + where + ')' if where else ''} - "
                      "a parse that other people screenshot, and Findruid has to be reminded happened.")
     if h.get("total_raids"):
         lines.append(f"{h['total_raids']} raid nights across {h.get('tier_count') or 0} tiers"
@@ -279,7 +282,34 @@ def _findruid(p: dict[str, Any]) -> list[str]:
     return lines
 
 
-LEGENDS = {"findruid": _findruid}
+def _norman(p: dict[str, Any]) -> list[str]:
+    """The raid leader asked for this. Every number in it is his own, which is the problem."""
+    h = p.get("history") or {}
+    worst, best = p.get("worst_boss") or {}, p.get("best_boss") or {}
+    lines = ["Raid leader. Explains the mechanic in detail, at length, twice, and then dies to it."]
+    if p.get("avg") is not None:
+        lines.append(f"Averages a {round(p['avg'])} percentile. Runs the roster, writes the strat, calls the cooldowns, "
+                     "and is out-parsed by most of the people he is calling them for.")
+    if worst.get("pct") is not None:
+        lines.append(f"Holds a {round(worst['pct'])} percentile on {worst['boss']}. Not a typo. "
+                     f"{round(worst['pct'])}. Out of a hundred.")
+    if p.get("pct") is not None:
+        lines.append(f"{round(p['pct'])}% attendance, from the man who keeps the attendance sheet.")
+    if best.get("pct") is not None:
+        lines.append(f"Did once put up an {round(best['pct'])} on {best['boss']}, and has dined out on it ever since. "
+                     "It is, to be fair, the only exhibit he has.")
+    if p.get("mplus_score"):
+        lines.append(f"Mythic+ score of {round(p['mplus_score'])}, which he will raise the instant anyone mentions "
+                     "his raid logs. Nobody has been fooled yet.")
+    if h.get("total_raids"):
+        lines.append(f"{h['total_raids']} raid nights across {h.get('tier_count') or 0} tiers"
+                     f"{', since ' + h['first_tier'] if h.get('first_tier') else ''}. Longevity is a skill. "
+                     "It is not, sadly, the one on the meter.")
+    lines.append("Genuinely holds the whole thing together, and would be insufferable if we admitted it. So we don't.")
+    return lines
+
+
+LEGENDS = {"findruid": _findruid, "norman": _norman}
 
 
 def bio(player: dict[str, Any]) -> list[str]:

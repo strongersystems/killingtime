@@ -1064,22 +1064,27 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
         per_boss.setdefault(r["player_name"], []).append(r)
 
     # The best parse of their career, wherever and whenever it happened - a peak from two tiers ago still counts.
+    #
+    # Only Heroic and Mythic, and only on the hardest difficulty the player actually raids: a percentile is a
+    # ranking against everyone else who killed that boss that way, so a 100 on Normal (which half this roster has,
+    # from a barely-logged tier) says nothing at all. "Best on the hardest difficulty they raid" is a claim that
+    # survives being checked.
     career_best: dict[str, dict] = {}
     for r in _rows(
         conn,
         """SELECT p.player_name, p.rank_percent AS pct, p.encounter_name, p.difficulty, z.name AS zone_name,
                   date(p.start_time / 1000, 'unixepoch') AS on_date
            FROM v_parses p JOIN zones z ON z.id = p.zone_id
-           WHERE p.rank_percent IS NOT NULL
-           ORDER BY p.player_name, p.rank_percent DESC""",
+           WHERE p.rank_percent IS NOT NULL AND p.difficulty IN (4, 5)
+           ORDER BY p.player_name, p.difficulty DESC, p.rank_percent DESC""",
     ):
-        career_best.setdefault(r["player_name"], r)   # the ordering makes the first row per player the best
+        career_best.setdefault(r["player_name"], r)   # the ordering makes the first row per player the one we want
     career_totals = {
         r["player_name"]: r for r in _rows(
             conn,
             """SELECT player_name, COUNT(*) AS parses, AVG(rank_percent) AS avg_pct,
                       COUNT(DISTINCT encounter_id) AS bosses
-               FROM v_parses WHERE rank_percent IS NOT NULL GROUP BY player_name""",
+               FROM v_parses WHERE rank_percent IS NOT NULL AND difficulty IN (4, 5) GROUP BY player_name""",
         )
     }
 
