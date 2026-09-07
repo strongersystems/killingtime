@@ -50,13 +50,23 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
     rio_by_slug = {r["raid_slug"]: r for r in ov["raiderio"]}
 
     def ranks(t: dict) -> dict[str, Any]:
-        r = rio_by_slug.get(t.get("rio_raid_slug") or "")
+        slug = t.get("rio_raid_slug") or ""
+        r = rio_by_slug.get(slug)
         out: dict[str, Any] = {}
         if r:
             if r["mythic_world"]:
                 out["mythic"] = {"world": r["mythic_world"], "realm": r["mythic_realm"]}
             if r["heroic_world"]:
                 out["heroic"] = {"world": r["heroic_world"], "realm": r["heroic_realm"]}
+        # Older tiers are not in the guild profile (Raider.IO only reports the current expansion there), but the
+        # realm leaderboard still has our rank.
+        for row in conn.execute(
+            """SELECT k.difficulty, k.realm_rank, k.world_rank FROM rio_rankings k JOIN guilds g ON g.id = k.guild_id
+               WHERE g.is_home = 1 AND k.raid_slug = ? AND k.difficulty IN (4, 5) AND k.realm_rank > 0""", (slug,)
+        ):
+            key = "mythic" if row["difficulty"] == 5 else "heroic"
+            if key not in out:
+                out[key] = {"world": row["world_rank"], "realm": row["realm_rank"]}
         wcl = conn.execute(
             "SELECT world_rank, region_rank, server_rank FROM wcl_zone_rankings WHERE zone_id = ? AND metric = 'progress'", (t["id"],)
         ).fetchone()

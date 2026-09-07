@@ -193,6 +193,7 @@ Options, from simplest to most robust:
 | Guild not found on Warcraft Logs | Guild name is case-insensitive but must match exactly (spaces included). Realm goes in `GUILD_REALM` as displayed, e.g. `Twisting Nether`. |
 | Reports exist but pulls are 0 | Reports are private/unlisted on Warcraft Logs. Set report visibility to public. |
 | Rival shows no per-boss data | The guild hides pulls on Raider.IO (`guildPrivacy`) or is further down the realm than `RIO_REALM_SCAN_PAGES` × 100. Raise the page count. |
+| A tier shows fewer bosses killed than we remember | Kills only reach the app through Warcraft Logs reports uploaded to the guild. A night logged personally, or never uploaded, has no pulls here. Raider.IO is used as the record of what the guild killed, so the boss still counts and is marked "no log" with no pull count. |
 | Pull counts look about double what Raider.IO shows | Two people logged the same raid. The sync marks the second copy of every pull as a duplicate (same boss and difficulty, starting within 60 s in a different report) and every metric uses the remaining copy; the Status log line "duplicate pulls from second loggers hidden" shows how many. |
 | A zone shows no Raider.IO mapping on Status | Set `TIER_MAP={"<zone id>": "<raider.io slug>"}`; slugs are visible in Raider.IO URLs. |
 | `rate limit reached (429)` during sync | Wait for the hour to reset. Use `--skip-attendance` to save points, or lower `SYNC_EXPANSIONS`. |

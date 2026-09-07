@@ -62,6 +62,44 @@ def teams_seen(conn: sqlite3.Connection) -> list[str]:
     return [r["team"] for r in conn.execute("SELECT team FROM report_teams GROUP BY team ORDER BY MIN(rowid)")]
 
 
+def rio_kills_for_zone(conn: sqlite3.Connection, zone_id: int, difficulty: int) -> dict[int, dict[str, Any]]:
+    """What Raider.IO credits the *guild* with in a zone: {encounter_id: {killed, first_kill_ms}}.
+
+    Raider.IO is the record of what the guild actually killed. Our own Warcraft Logs data only covers reports
+    uploaded to the guild, so it can miss kills that were logged personally or never uploaded."""
+    return {
+        r["encounter_id"]: {"killed": bool(r["is_defeated"]), "first_kill_ms": r["first_defeated"]}
+        for r in _rows(
+            conn,
+            """SELECT e.id AS encounter_id, p.is_defeated, p.first_defeated
+               FROM encounters e
+               JOIN zones z ON z.id = e.zone_id
+               JOIN rio_progress p ON p.raid_slug = z.rio_raid_slug AND p.encounter_slug = e.rio_encounter_slug
+               JOIN guilds g ON g.id = p.guild_id AND g.is_home = 1
+               WHERE e.zone_id = ? AND p.difficulty = ? AND e.rio_encounter_slug IS NOT NULL""",
+            (zone_id, difficulty),
+        )
+    }
+
+
+def _rio_kill_counts(conn: sqlite3.Connection, zone_id: int) -> dict[int, int]:
+    """Bosses Raider.IO credits the guild with per difficulty in a zone."""
+    return {
+        int(r["difficulty"]): int(r["killed"] or 0)
+        for r in _rows(
+            conn,
+            """SELECT p.difficulty, COUNT(*) AS killed
+               FROM encounters e
+               JOIN zones z ON z.id = e.zone_id
+               JOIN rio_progress p ON p.raid_slug = z.rio_raid_slug AND p.encounter_slug = e.rio_encounter_slug
+               JOIN guilds g ON g.id = p.guild_id AND g.is_home = 1
+               WHERE e.zone_id = ? AND p.is_defeated = 1 AND p.difficulty IN (3,4,5)
+               GROUP BY p.difficulty""",
+            (zone_id,),
+        )
+    }
+
+
 # ------------------------------------------------------------------------------------------ tiers
 def tiers(conn: sqlite3.Connection, team: str | None = None) -> list[dict[str, Any]]:
     """Zones that have any of our pulls, newest first, with a per-difficulty kill count."""
@@ -88,6 +126,11 @@ def tiers(conn: sqlite3.Connection, team: str | None = None) -> list[dict[str, A
             (r["id"], *tp),
         )
         r["kills"] = {int(k["difficulty"]): int(k["killed"] or 0) for k in kills if k["difficulty"] is not None}
+        r["logged_kills"] = dict(r["kills"])
+        if not team:  # Raider.IO knows the guild, not a team: only the guild view can be topped up from it
+            for d, n in _rio_kill_counts(conn, r["id"]).items():
+                if n > r["kills"].get(d, 0):
+                    r["kills"][d] = n
         r["first_report_date"] = ms_to_date(r["first_report"])
         r["last_report_date"] = ms_to_date(r["last_report"])
         r["summary"] = " / ".join(
@@ -135,7 +178,17 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
             FROM v_pulls WHERE zone_id = ? AND difficulty = ?{tf}""",
         (zone_id, difficulty, *tp),
     ).fetchone()
-    killed = sum(1 for b in bosses if b["killed"])
+    rio = rio_kills_for_zone(conn, zone_id, difficulty) if not team else {}
+    for b in bosses:
+        r = rio.get(b["id"], {})
+        b["rio_killed"] = bool(r.get("killed"))
+        b["rio_first_kill_date"] = ms_to_date(r.get("first_kill_ms"))
+        b["killed_any"] = bool(b["killed"]) or b["rio_killed"]
+        # A kill Raider.IO credits the guild with that never reached our guild logs.
+        b["log_missing"] = b["rio_killed"] and not b["killed"]
+    killed_logged = sum(1 for b in bosses if b["killed"])
+    killed = sum(1 for b in bosses if b["killed_any"])
+    unlogged = [b["name"] for b in bosses if b["log_missing"]]
     first_pull = totals["first_pull"]
     last_kill = max((b["first_kill_time"] for b in bosses if b["first_kill_time"]), default=None)
     days_to_current = (last_kill - first_pull) / DAY_MS if (first_pull and last_kill) else None
@@ -146,6 +199,8 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         "difficulty_name": DIFFICULTIES.get(difficulty, str(difficulty)),
         "bosses": bosses,
         "killed": killed,
+        "killed_logged": killed_logged,
+        "unlogged_kills": unlogged,
         "total_bosses": len(bosses),
         "cleared": killed == len(bosses) and killed > 0,
         "pulls": totals["pulls"] or 0,
@@ -158,7 +213,7 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         "last_pull_date": ms_to_date(totals["last_pull"]),
         "last_kill_date": ms_to_date(last_kill),
         "days_to_latest_kill": round(days_to_current, 1) if days_to_current is not None else None,
-        "next_boss": next((b for b in bosses if not b["killed"]), None),
+        "next_boss": next((b for b in bosses if not b["killed_any"]), None),
     }
 
 
@@ -443,11 +498,18 @@ def _our_boss_progress(conn: sqlite3.Connection, raid_slug: str, difficulty: int
                 WHERE e.zone_id = ? AND e.rio_encounter_slug IS NOT NULL""",
             (difficulty, *tp, zone["id"]),
         )
+        rio = {} if team else {
+            p["encounter_slug"]: p
+            for p in _rows(conn, """SELECT p.encounter_slug, p.is_defeated, p.first_defeated FROM rio_progress p
+                                    JOIN guilds g ON g.id = p.guild_id AND g.is_home = 1
+                                    WHERE p.raid_slug = ? AND p.difficulty = ?""", (raid_slug, difficulty))
+        }
         for r in rows:
+            rp = rio.get(r["slug"], {})
             out[r["slug"]] = {
-                "killed": bool(r["killed"]),
+                "killed": bool(r["killed"]) or bool(rp.get("is_defeated")),
                 "pulls": r["pulls_to_kill"] if r["pulls_to_kill"] else None,
-                "first_kill_ms": r["first_kill_time"],
+                "first_kill_ms": r["first_kill_time"] or (rp.get("first_defeated") if rp.get("is_defeated") else None),
                 "started_ms": r["first_pull_time"],
                 "source": "logs",
             }

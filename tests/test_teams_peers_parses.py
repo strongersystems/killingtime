@@ -247,3 +247,29 @@ def test_peer_modes_web(synced):
     assert "Around our realm rank" in page and "Realm rank" in page and "5 places above" in page
     api = client.get("/api/peers/the-venomous-abyss?difficulty=5&peers=rank").json()
     assert api["mode"] == "rank" and api["peer_count"] == 2
+
+
+def test_raiderio_fills_kills_missing_from_logs(synced):
+    """A boss the guild killed per Raider.IO but that never reached our guild logs still counts (guild view only)."""
+    conn, *_ = synced
+    # Ula'tek (zone 46, mythic) has no kill in the fixture's logs; pretend Raider.IO credits the guild with it.
+    home = metrics.home_guild(conn)["id"]
+    conn.execute(
+        """INSERT OR REPLACE INTO rio_progress(guild_id, raid_slug, difficulty, encounter_slug, first_defeated,
+               last_defeated, num_pulls, best_percent, is_defeated, pull_started_at, fetched_at)
+           VALUES (?, 'the-venomous-abyss', 5, 'ulatek', 1788000000000, NULL, 30, 0, 1, NULL, 0)""", (home,))
+    conn.commit()
+    s = metrics.tier_summary(conn, 46, 5)
+    assert s["killed_logged"] == 1 and s["killed"] == 2
+    assert s["unlogged_kills"] == ["Ulatek"]
+    ula = next(b for b in s["bosses"] if b["name"] == "Ulatek")
+    assert ula["log_missing"] is True and ula["killed_any"] is True and not ula["killed"]
+    assert s["next_boss"]["name"] == "Entombed Sentinels"  # still the real next boss, not the one RIO filled in
+    assert metrics.tiers(conn)[0]["kills"][5] == 2 and metrics.tiers(conn)[0]["logged_kills"][5] == 1
+    # a team keeps its own logged kills: Raider.IO cannot attribute a kill to one team
+    assert metrics.tier_summary(conn, 46, 5, "CE Team")["killed"] == 1
+    assert metrics.tiers(conn, "CE Team")[0]["kills"][5] == 1
+    # the peers view counts it as killed too, without inventing a pull count
+    cmp = metrics.peer_comparison(conn, "the-venomous-abyss", 5)
+    ula_peer = next(b for b in cmp["bosses"] if b["slug"] == "ulatek")
+    assert ula_peer["killed"] is True and ula_peer["our_pulls"] is None

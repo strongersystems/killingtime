@@ -44,10 +44,10 @@
     <tbody>
     {% for b in summary.bosses %}
     {% set p = b.peer %}
-    <tr class="{{ 'killed' if b.killed else ('active' if b.total_pulls) }}">
+    <tr class="{{ 'killed' if b.killed_any else ('active' if b.total_pulls) }}">
       <td>{{ b.ord }}</td><td><b>{{ b.name }}</b></td>
-      <td>{{ b.first_kill_date or ('in progress' if b.total_pulls else '—') }}</td>
-      <td class="num">{% if b.killed %}{{ b.pulls_to_kill }}{% elif b.total_pulls %}{{ b.total_pulls }}+{% else %}—{% endif %}</td>
+      <td>{% if b.first_kill_date %}{{ b.first_kill_date }}{% elif b.log_missing %}{{ b.rio_first_kill_date or 'killed' }} <span class="pill" title="Raider.IO credits the guild with this kill, but it is not in our Warcraft Logs reports - the night was logged personally or never uploaded.">no log</span>{% elif b.total_pulls %}in progress{% else %}—{% endif %}</td>
+      <td class="num">{% if b.killed %}{{ b.pulls_to_kill }}{% elif b.log_missing %}—{% elif b.total_pulls %}{{ b.total_pulls }}+{% else %}—{% endif %}</td>
       <td class="num">{{ b.nights_to_kill or '—' }}</td>
       <td class="num">{{ (b.best_pct|num(1) ~ '%') if b.best_pct is not none else '—' }}</td>
       {% if peers %}
@@ -62,6 +62,9 @@
     </tbody>
   </table>
   </div>
+  {% if summary.unlogged_kills %}
+  <p class="muted">{{ summary.unlogged_kills|length }} of these kills ({{ summary.unlogged_kills|join(', ') }}) come from Raider.IO only: the guild is credited with them, but the night is not in our Warcraft Logs reports, so they have no pull count here.</p>
+  {% endif %}
   <p class="muted">Pulls to kill counts every pull up to and including the first kill ("+" = still in progress). Peer columns compare with guilds at a similar kill count on Raider.IO:
     <b>out-pulled</b> is the share of those guilds that needed more pulls than {{ 'we' if not team else 'this team' }} did; <b>day</b> is days from the first pull in the raid to the kill.</p>
 </div>

@@ -531,12 +531,17 @@ def _store_ranking_entry(conn: sqlite3.Connection, entry: dict, raid_slug: str, 
     return gid
 
 
-def _load_rio_static(conn: sqlite3.Connection, rio: RaiderIOClient, wanted_slugs: set[str], stats: SyncStats, progress: Progress) -> None:
-    """Fetch Raider.IO raid/boss reference data, trying expansion ids from newest downwards until all slugs are known."""
+def _load_rio_static(conn: sqlite3.Connection, rio: RaiderIOClient, wanted_slugs: set[str], stats: SyncStats, progress: Progress,
+                     n_expansions: int = 2) -> None:
+    """Fetch Raider.IO raid/boss reference data for the newest ``n_expansions`` expansions (and any expansion still
+    holding a wanted slug), so older tiers we have logs for can be linked to Raider.IO as well."""
     known = {r["slug"] for r in conn.execute("SELECT slug FROM rio_raids")}
     missing = wanted_slugs - known
-    if not missing:
+    loaded_expansions = {r["expansion_id"] for r in conn.execute("SELECT DISTINCT expansion_id FROM rio_raids WHERE expansion_id IS NOT NULL")}
+    wanted_expansions = max(1, n_expansions)
+    if not missing and len(loaded_expansions) >= wanted_expansions:
         return
+    seen = 0
     for exp_id in range(13, 7, -1):
         try:
             data = rio.static_data(exp_id)
@@ -557,8 +562,9 @@ def _load_rio_static(conn: sqlite3.Connection, rio: RaiderIOClient, wanted_slugs
                         (raid["slug"], enc["slug"], enc["name"], enc.get("ordinal", j) if isinstance(enc.get("ordinal"), int) else j + 1),
                     )
                 missing.discard(raid["slug"])
+        seen += 1
         progress(f"raider.io static data for expansion {exp_id}: {len(raids)} raids")
-        if not missing:
+        if not missing and seen >= wanted_expansions:
             break
     if missing:
         stats.warn(f"raider.io static data not found for raids: {sorted(missing)}", progress)
@@ -614,9 +620,18 @@ def sync_raiderio(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Setti
             rival_realms.add((rival.realm_slug, rival.region))
         stats.rio_guilds += 1
 
-    _load_rio_static(conn, rio, raid_slugs, stats, progress)
+    _load_rio_static(conn, rio, raid_slugs, stats, progress, n_expansions=settings.sync_expansions)
     map_zones_to_rio(conn, settings.tier_map_dict, stats, progress)
 
+    # Also cover every older raid we have logs for: Raider.IO is the record of what the guild actually killed, and
+    # guild-tagged logs can miss kills (a night logged personally, or not uploaded at all).
+    raid_slugs |= {
+        r["rio_raid_slug"]
+        for r in conn.execute(
+            """SELECT DISTINCT z.rio_raid_slug FROM zones z WHERE z.rio_raid_slug IS NOT NULL
+               AND EXISTS (SELECT 1 FROM reports r WHERE r.zone_id = z.id)"""
+        )
+    }
     # Only scan real raids (skip 1-boss world-boss "raids") to save requests.
     placeholders = ",".join("?" * len(raid_slugs))
     scan_raids = [

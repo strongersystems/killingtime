@@ -72,13 +72,15 @@ Hosting it for the whole guild: [docs/DEPLOY.md](docs/DEPLOY.md). How it fits to
 | Raider.IO API | none | Per-boss first kills, pull counts and best % for **every guild on the realm** and configured rivals; world/region/realm ranks; raid/boss reference data |
 
 Cross-guild comparisons come from Raider.IO on purpose: rivals don't need to publish their logs, and you don't
-burn Warcraft Logs API points on other guilds.
+burn Warcraft Logs API points on other guilds. Raider.IO is also the record of *what the guild killed*: a boss counts
+as killed if either source says so, because a raid night logged personally (or not uploaded at all) never reaches the
+guild's Warcraft Logs reports. Such kills are shown as "no log" and have no pull count.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 36 tests, no network needed
+pytest -q          # 40 tests, no network needed
 ruff check .
 ```
 

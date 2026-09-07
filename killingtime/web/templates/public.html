@@ -113,8 +113,8 @@
       </div>
       {% if current.ranks %}
       <div class="ranks">
-        {% if current.ranks.mythic %}<div class="rank">Mythic rank <b>#{{ current.ranks.mythic.realm }}</b> realm · <b>#{{ current.ranks.mythic.world|num }}</b> world</div>{% endif %}
-        {% if current.ranks.heroic %}<div class="rank">Heroic rank <b>#{{ current.ranks.heroic.realm }}</b> realm · <b>#{{ current.ranks.heroic.world|num }}</b> world</div>{% endif %}
+        {% if current.ranks.mythic %}<div class="rank">Mythic rank <b>#{{ current.ranks.mythic.realm }}</b> realm{% if current.ranks.mythic.world %} · <b>#{{ current.ranks.mythic.world|num }}</b> world{% endif %}</div>{% endif %}
+        {% if current.ranks.heroic %}<div class="rank">Heroic rank <b>#{{ current.ranks.heroic.realm }}</b> realm{% if current.ranks.heroic.world %} · <b>#{{ current.ranks.heroic.world|num }}</b> world{% endif %}</div>{% endif %}
         {% if current.ranks.wcl %}<div class="rank">Warcraft Logs progress <b>#{{ current.ranks.wcl.world|num }}</b> world · <b>#{{ current.ranks.wcl.region|num }}</b> {{ settings.region }}</div>{% endif %}
       </div>
       {% endif %}
@@ -170,8 +170,8 @@
         {% set byd = {} %}{% for d in t.difficulties %}{% set _ = byd.update({d.difficulty: d}) %}{% endfor %}
         <tr><td><b>{{ t.name }}</b></td><td class="muted">{{ t.expansion or '' }}</td>
           {% for code in (5, 4, 3) %}<td>{% if byd[code] %}<span class="pill {{ DIFFICULTIES[code][0]|lower }}">{{ byd[code].killed }}/{{ byd[code].total }}</span>{% if byd[code].cleared %} <span class="muted">{{ byd[code].last_kill_date }}</span>{% endif %}{% else %}—{% endif %}</td>{% endfor %}
-          <td class="num">{% if t.ranks.mythic %}#{{ t.ranks.mythic.realm }} realm · #{{ t.ranks.mythic.world|num }} world{% elif t.ranks.wcl %}#{{ t.ranks.wcl.world|num }} world (WCL){% else %}—{% endif %}</td>
-          <td class="num">{% if t.ranks.heroic %}#{{ t.ranks.heroic.realm }} realm · #{{ t.ranks.heroic.world|num }} world{% else %}—{% endif %}</td>
+          <td class="num">{% if t.ranks.mythic %}#{{ t.ranks.mythic.realm }} realm{% if t.ranks.mythic.world %} · #{{ t.ranks.mythic.world|num }} world{% endif %}{% elif t.ranks.wcl %}#{{ t.ranks.wcl.world|num }} world (WCL){% else %}—{% endif %}</td>
+          <td class="num">{% if t.ranks.heroic %}#{{ t.ranks.heroic.realm }} realm{% if t.ranks.heroic.world %} · #{{ t.ranks.heroic.world|num }} world{% endif %}{% else %}—{% endif %}</td>
           <td class="muted">{{ t.first }} → {{ t.last }}</td></tr>
         {% endfor %}
         </tbody>
