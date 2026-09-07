@@ -8,6 +8,9 @@ A progress and reporting app for the guild **Killing Time** (Draenor, EU). It pu
   Peers, Realm - shows that team's logs only; "whole guild" is one more option.
 - **Progress** – the current tier by default with a tier and difficulty switcher: bosses down, next boss and best pull,
   pulls, nights, median parse, and a boss-by-boss table with the peer numbers inline.
+- **Season-accurate progress** – a tier counts as it stood at the season cut-off (when Cutting Edge / Ahead of the
+  Curve stop and the Mythic+ season ends). Kills after it are marked post-season and excluded from the tier's
+  progress, and each closed tier shows whether CE / AOTC was earned.
 - **History** – tier-over-tier comparison aligned by boss order and by days since first pull (cumulative pulls,
   days to each kill, pulls per boss, nights per tier).
 - **Peers** – "guilds around our level" for this and last tier: our pulls per boss vs the average, median and
@@ -80,7 +83,7 @@ guild's Warcraft Logs reports. Such kills are shown as "no log" and have no pull
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 40 tests, no network needed
+pytest -q          # 42 tests, no network needed
 ruff check .
 ```
 

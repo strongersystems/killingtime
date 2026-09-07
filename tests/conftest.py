@@ -169,15 +169,32 @@ class FakeWCL:
         return {"limitPerHour": 3600, "pointsSpentThisHour": 42.5, "pointsResetIn": 1800}
 
 
+def _window(starts: str, ends: str | None = None) -> dict:
+    out = {"starts": {"eu": f"{starts}T04:00:00Z", "us": f"{starts}T15:00:00Z"}}
+    if ends:
+        out["ends"] = {"eu": f"{ends}T04:00:00Z", "us": f"{ends}T15:00:00Z"}
+    return out
+
+
 RIO_STATIC = {
     11: {"raids": [
-        {"id": 16915, "slug": "the-venomous-abyss", "name": "The Venomous Abyss",
+        {"id": 16915, "slug": "the-venomous-abyss", "name": "The Venomous Abyss", **_window("2026-08-01"),
          "encounters": [{"slug": "nekzali-the-soulcoiler", "name": "Nek'zali the Soulcoiler"}, {"slug": "entombed-sentinels", "name": "Entombed Sentinels"}, {"slug": "ulatek", "name": "Ulatek"}]},
-        {"id": 8062, "slug": "sporefall", "name": "Sporefall", "encounters": [{"slug": "rotmire", "name": "Rotmire"}]},
+        {"id": 8062, "slug": "sporefall", "name": "Sporefall", **_window("2026-08-01"), "encounters": [{"slug": "rotmire", "name": "Rotmire"}]},
     ]},
     10: {"raids": [
-        {"id": 16178, "slug": "manaforge-omega", "name": "Manaforge Omega",
+        {"id": 16178, "slug": "manaforge-omega", "name": "Manaforge Omega", **_window("2026-04-01", "2026-08-01"),
          "encounters": [{"slug": "plexus-sentinel", "name": "Plexus Sentinel"}, {"slug": "loomithar", "name": "Loom'ithar"}, {"slug": "dimensius", "name": "Dimensius"}]},
+    ]},
+}
+
+# The Manaforge season closed on 2026-05-10, so the Dimensius kill on 2026-05-14 is a post-season clear.
+# The current season (The Venomous Abyss) is still running.
+RIO_SEASONS = {
+    11: {"seasons": [{"slug": "season-mn-1", **_window("2026-08-01", "2030-01-01")}]},
+    10: {"seasons": [
+        {"slug": "season-tww-3", **_window("2026-04-01", "2026-08-01")},
+        {"slug": "season-tww-3-cutoffs", **_window("2026-04-01", "2026-05-10")},
     ]},
 }
 
@@ -247,6 +264,13 @@ class FakeRIO:
         if expansion_id not in RIO_STATIC:
             raise RaiderIOError("bad expansion")
         return RIO_STATIC[expansion_id]
+
+    def mythic_plus_static_data(self, expansion_id):
+        self.requests_made += 1
+        from killingtime.raiderio import RaiderIOError
+        if expansion_id not in RIO_SEASONS:
+            raise RaiderIOError("bad expansion")
+        return RIO_SEASONS[expansion_id]
 
     def raid_rankings(self, raid, difficulty, region, realm=None, page=0, limit=100):
         self.requests_made += 1

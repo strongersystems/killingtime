@@ -531,13 +531,57 @@ def _store_ranking_entry(conn: sqlite3.Connection, entry: dict, raid_slug: str, 
     return gid
 
 
+BASE_SEASON = re.compile(r"^season-[a-z]+-\d+$")
+
+
+def season_cutoffs(seasons: list[dict], region: str) -> list[dict]:
+    """Base seasons with their cut-off: the date after which kills are post-season (no Cutting Edge / Ahead of the
+    Curve, Mythic+ over). Raider.IO marks it with a ``-cutoffs`` season variant, or a ``-post`` season starting then;
+    without either, the season's own end date is the cut-off."""
+    def when(s: dict, key: str) -> int | None:
+        d = s.get(key) or {}
+        return iso_to_ms(d.get(region) or d.get("us"))
+
+    by_slug = {s.get("slug"): s for s in seasons if s.get("slug")}
+    out = []
+    for slug, s in by_slug.items():
+        if not BASE_SEASON.match(slug):
+            continue
+        starts, ends = when(s, "starts"), when(s, "ends")
+        candidates = [c for c in (ends, when(by_slug.get(f"{slug}-cutoffs", {}), "ends"),
+                                  when(by_slug.get(f"{slug}-post", {}), "starts")) if c]
+        out.append({"slug": slug, "starts": starts, "ends": ends, "cutoff": min(candidates) if candidates else None})
+    return [s for s in out if s["starts"]]
+
+
+def _apply_raid_windows(conn: sqlite3.Connection, raids: list[dict], seasons: list[dict], region: str, exp_id: int,
+                        progress: Progress) -> None:
+    """Store each raid's open/close dates and the cut-off of the season it belongs to (nearest season start)."""
+    cutoffs = season_cutoffs(seasons, region)
+    for raid in raids:
+        starts = iso_to_ms((raid.get("starts") or {}).get(region) or (raid.get("starts") or {}).get("us"))
+        ends = iso_to_ms((raid.get("ends") or {}).get(region) or (raid.get("ends") or {}).get("us"))
+        season = min(cutoffs, key=lambda s: abs(s["starts"] - starts)) if (cutoffs and starts) else None
+        cutoff = season["cutoff"] if season else None
+        # A tier also ends when the next raid opens, whichever comes first.
+        cutoff = min([c for c in (cutoff, ends) if c], default=None)
+        conn.execute(
+            "UPDATE rio_raids SET starts_at = ?, ends_at = ?, season_slug = ?, cutoff_at = ? WHERE slug = ?",
+            (starts, ends, season["slug"] if season else None, cutoff, raid["slug"]),
+        )
+    named = [r["slug"] for r in raids if r.get("starts")]
+    if named:
+        progress(f"raider.io season windows for expansion {exp_id}: {len(named)} raids")
+
+
 def _load_rio_static(conn: sqlite3.Connection, rio: RaiderIOClient, wanted_slugs: set[str], stats: SyncStats, progress: Progress,
-                     n_expansions: int = 2) -> None:
+                     n_expansions: int = 2, region: str = "eu") -> None:
     """Fetch Raider.IO raid/boss reference data for the newest ``n_expansions`` expansions (and any expansion still
     holding a wanted slug), so older tiers we have logs for can be linked to Raider.IO as well."""
     known = {r["slug"] for r in conn.execute("SELECT slug FROM rio_raids")}
     missing = wanted_slugs - known
-    loaded_expansions = {r["expansion_id"] for r in conn.execute("SELECT DISTINCT expansion_id FROM rio_raids WHERE expansion_id IS NOT NULL")}
+    loaded_expansions = {r["expansion_id"] for r in conn.execute(
+        "SELECT DISTINCT expansion_id FROM rio_raids WHERE expansion_id IS NOT NULL AND cutoff_at IS NOT NULL")}
     wanted_expansions = max(1, n_expansions)
     if not missing and len(loaded_expansions) >= wanted_expansions:
         return
@@ -562,6 +606,12 @@ def _load_rio_static(conn: sqlite3.Connection, rio: RaiderIOClient, wanted_slugs
                         (raid["slug"], enc["slug"], enc["name"], enc.get("ordinal", j) if isinstance(enc.get("ordinal"), int) else j + 1),
                     )
                 missing.discard(raid["slug"])
+            try:
+                seasons = (rio.mythic_plus_static_data(exp_id) or {}).get("seasons") or []
+            except RaiderIOError as exc:
+                stats.warn(f"raider.io season data for expansion {exp_id} failed: {exc}", progress)
+                seasons = []
+            _apply_raid_windows(conn, raids, seasons, region, exp_id, progress)
         seen += 1
         progress(f"raider.io static data for expansion {exp_id}: {len(raids)} raids")
         if not missing and seen >= wanted_expansions:
@@ -620,7 +670,7 @@ def sync_raiderio(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Setti
             rival_realms.add((rival.realm_slug, rival.region))
         stats.rio_guilds += 1
 
-    _load_rio_static(conn, rio, raid_slugs, stats, progress, n_expansions=settings.sync_expansions)
+    _load_rio_static(conn, rio, raid_slugs, stats, progress, n_expansions=settings.sync_expansions, region=home.region)
     map_zones_to_rio(conn, settings.tier_map_dict, stats, progress)
 
     # Also cover every older raid we have logs for: Raider.IO is the record of what the guild actually killed, and

@@ -39,7 +39,7 @@ def test_api_endpoints(client):
     ov = client.get("/api/overview").json()
     assert ov["current_tier"]["id"] == 46
     tier = client.get("/api/tier/44?difficulty=5").json()
-    assert tier["killed"] == 3
+    assert tier["killed"] == 2 and tier["killed_all_time"] == 3  # Dimensius was killed after the season cut-off
     riv = client.get("/api/rivals/the-venomous-abyss?difficulty=5").json()
     assert riv["guilds"][0]["is_home"] is True
     assert client.get("/healthz").json()["ok"] is True

@@ -82,8 +82,8 @@ def rio_kills_for_zone(conn: sqlite3.Connection, zone_id: int, difficulty: int) 
     }
 
 
-def _rio_kill_counts(conn: sqlite3.Connection, zone_id: int) -> dict[int, int]:
-    """Bosses Raider.IO credits the guild with per difficulty in a zone."""
+def _rio_kill_counts(conn: sqlite3.Connection, zone_id: int, cutoff: int | None = None) -> dict[int, int]:
+    """Bosses Raider.IO credits the guild with per difficulty in a zone, ignoring post-season kills."""
     return {
         int(r["difficulty"]): int(r["killed"] or 0)
         for r in _rows(
@@ -94,10 +94,22 @@ def _rio_kill_counts(conn: sqlite3.Connection, zone_id: int) -> dict[int, int]:
                JOIN rio_progress p ON p.raid_slug = z.rio_raid_slug AND p.encounter_slug = e.rio_encounter_slug
                JOIN guilds g ON g.id = p.guild_id AND g.is_home = 1
                WHERE e.zone_id = ? AND p.is_defeated = 1 AND p.difficulty IN (3,4,5)
+                 AND (? IS NULL OR p.first_defeated IS NULL OR p.first_defeated <= ?)
                GROUP BY p.difficulty""",
-            (zone_id,),
+            (zone_id, cutoff, cutoff),
         )
     }
+
+
+def zone_cutoff(conn: sqlite3.Connection, zone_id: int) -> int | None:
+    """The season cut-off for a tier (ms), after which a kill earns no Cutting Edge / Ahead of the Curve.
+    None while the tier is still running (a cut-off in the future, including Raider.IO's far-future placeholder for
+    the live season) or when Raider.IO has no window for the raid."""
+    row = conn.execute(
+        """SELECT r.cutoff_at FROM zones z JOIN rio_raids r ON r.slug = z.rio_raid_slug WHERE z.id = ?""", (zone_id,)
+    ).fetchone()
+    cutoff = int(row["cutoff_at"]) if row and row["cutoff_at"] else None
+    return cutoff if (cutoff and cutoff <= int(datetime.now(UTC).timestamp() * 1000)) else None
 
 
 # ------------------------------------------------------------------------------------------ tiers
@@ -112,23 +124,28 @@ def tiers(conn: sqlite3.Connection, team: str | None = None) -> list[dict[str, A
                (SELECT COUNT(*) FROM encounters e WHERE e.zone_id = z.id) AS bosses,
                (SELECT COUNT(*) FROM reports r {team_join} WHERE r.zone_id = z.id) AS reports,
                (SELECT MIN(start_time) FROM reports r {team_join} WHERE r.zone_id = z.id) AS first_report,
-               (SELECT MAX(end_time) FROM reports r {team_join} WHERE r.zone_id = z.id) AS last_report
-        FROM zones z LEFT JOIN expansions x ON x.id = z.expansion_id
+               (SELECT MAX(end_time) FROM reports r {team_join} WHERE r.zone_id = z.id) AS last_report,
+               rr.cutoff_at
+        FROM zones z LEFT JOIN expansions x ON x.id = z.expansion_id LEFT JOIN rio_raids rr ON rr.slug = z.rio_raid_slug
         WHERE EXISTS (SELECT 1 FROM reports r {team_join} WHERE r.zone_id = z.id)
         ORDER BY z.id DESC
         """,
         tp * 4,
     )
     for r in rows:
+        cutoff = zone_cutoff(conn, r["id"])
         kills = _rows(
             conn,
-            f"SELECT difficulty, SUM(killed) AS killed FROM {fk} WHERE zone_id = ?{tf} GROUP BY difficulty",
-            (r["id"], *tp),
+            f"""SELECT difficulty, SUM(CASE WHEN killed = 1 AND (? IS NULL OR first_kill_time <= ?) THEN 1 ELSE 0 END) AS killed
+                FROM {fk} WHERE zone_id = ?{tf} GROUP BY difficulty""",
+            (cutoff, cutoff, r["id"], *tp),
         )
+        r["cutoff"] = cutoff
+        r["cutoff_date"] = ms_to_date(cutoff)
         r["kills"] = {int(k["difficulty"]): int(k["killed"] or 0) for k in kills if k["difficulty"] is not None}
         r["logged_kills"] = dict(r["kills"])
         if not team:  # Raider.IO knows the guild, not a team: only the guild view can be topped up from it
-            for d, n in _rio_kill_counts(conn, r["id"]).items():
+            for d, n in _rio_kill_counts(conn, r["id"], cutoff).items():
                 if n > r["kills"].get(d, 0):
                     r["kills"][d] = n
         r["first_report_date"] = ms_to_date(r["first_report"])
@@ -179,6 +196,7 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         (zone_id, difficulty, *tp),
     ).fetchone()
     rio = rio_kills_for_zone(conn, zone_id, difficulty) if not team else {}
+    cutoff = zone_cutoff(conn, zone_id)
     for b in bosses:
         r = rio.get(b["id"], {})
         b["rio_killed"] = bool(r.get("killed"))
@@ -186,11 +204,22 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         b["killed_any"] = bool(b["killed"]) or b["rio_killed"]
         # A kill Raider.IO credits the guild with that never reached our guild logs.
         b["log_missing"] = b["rio_killed"] and not b["killed"]
-    killed_logged = sum(1 for b in bosses if b["killed"])
-    killed = sum(1 for b in bosses if b["killed_any"])
-    unlogged = [b["name"] for b in bosses if b["log_missing"]]
+        b["kill_ms"] = min([t for t in (b["first_kill_time"], r.get("first_kill_ms") if b["rio_killed"] else None) if t], default=None)
+        b["kill_date"] = ms_to_date(b["kill_ms"])
+        # Killed after the season ended: it counts as a clear, but earns no Cutting Edge / Ahead of the Curve and is
+        # not part of how the tier actually went.
+        b["post_season"] = bool(b["killed_any"] and cutoff and b["kill_ms"] and b["kill_ms"] > cutoff)
+        b["counts"] = b["killed_any"] and not b["post_season"]
+    killed_logged = sum(1 for b in bosses if b["killed"] and not b["post_season"])
+    killed = sum(1 for b in bosses if b["counts"])
+    killed_all_time = sum(1 for b in bosses if b["killed_any"])
+    unlogged = [b["name"] for b in bosses if b["log_missing"] and not b["post_season"]]
+    post_season = [{"boss": b["name"], "date": b["kill_date"]} for b in bosses if b["post_season"]]
+    final_boss = bosses[-1] if bosses else None
+    earned = bool(final_boss and final_boss["counts"])
     first_pull = totals["first_pull"]
-    last_kill = max((b["first_kill_time"] for b in bosses if b["first_kill_time"]), default=None)
+    # "Latest kill" means the tier's progression, so a post-season clear does not extend it.
+    last_kill = max((b["kill_ms"] for b in bosses if b["counts"] and b["kill_ms"]), default=None)
     days_to_current = (last_kill - first_pull) / DAY_MS if (first_pull and last_kill) else None
     return {
         "zone": dict(zone) if zone else None,
@@ -200,7 +229,15 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         "bosses": bosses,
         "killed": killed,
         "killed_logged": killed_logged,
+        "killed_all_time": killed_all_time,
         "unlogged_kills": unlogged,
+        "post_season_kills": post_season,
+        "cutoff": cutoff,
+        "cutoff_date": ms_to_date(cutoff),
+        "tier_over": bool(cutoff),
+        # Cutting Edge (Mythic) / Ahead of the Curve (Heroic) are earned by killing the final boss before the cut-off.
+        "achievement": ("Cutting Edge" if difficulty == 5 else "Ahead of the Curve" if difficulty == 4 else None),
+        "achievement_earned": earned if difficulty in (4, 5) else None,
         "total_bosses": len(bosses),
         "cleared": killed == len(bosses) and killed > 0,
         "pulls": totals["pulls"] or 0,
@@ -213,7 +250,7 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         "last_pull_date": ms_to_date(totals["last_pull"]),
         "last_kill_date": ms_to_date(last_kill),
         "days_to_latest_kill": round(days_to_current, 1) if days_to_current is not None else None,
-        "next_boss": next((b for b in bosses if not b["killed_any"]), None),
+        "next_boss": next((b for b in bosses if not b["counts"]), None),
     }
 
 

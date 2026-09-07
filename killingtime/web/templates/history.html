@@ -15,7 +15,8 @@
     <tbody>
     {% for t in tiers_all %}
     <tr><td><a href="{{ link(base ~ '/', tier=t.id) }}"><b>{{ t.name }}</b></a></td><td class="muted">{{ t.expansion or '' }}</td>
-      {% for dd in (5, 4, 3) %}<td>{% set s = t.by_diff.get(dd) %}{% if s %}<span class="pill {{ DIFFICULTIES[dd]|lower }}">{{ s.killed }}/{{ s.total_bosses }}</span> <span class="muted">{% if s.cleared %}cleared{% elif s.next_boss %}on {{ s.next_boss.name }}{% endif %}{% if s.unlogged_kills %} · {{ s.unlogged_kills|length }} unlogged{% endif %}</span>{% else %}—{% endif %}</td>{% endfor %}
+      {% for dd in (5, 4, 3) %}<td>{% set s = t.by_diff.get(dd) %}{% if s %}<span class="pill {{ DIFFICULTIES[dd]|lower }}">{{ s.killed }}/{{ s.total_bosses }}</span> <span class="muted">{% if s.cleared %}cleared{% elif s.next_boss %}on {{ s.next_boss.name }}{% endif %}{% if s.unlogged_kills %} · {{ s.unlogged_kills|length }} unlogged{% endif %}{% if s.post_season_kills %} · +{{ s.post_season_kills|length }} post-season{% endif %}</span>
+        {% if s.tier_over and s.achievement_earned %}<span class="pill good" title="{{ s.achievement }}">{{ 'CE' if dd == 5 else 'AOTC' }}</span>{% endif %}{% else %}—{% endif %}</td>{% endfor %}
       <td class="muted">{{ t.first_report_date }} → {{ t.last_report_date }}</td><td class="num">{{ t.reports }}</td></tr>
     {% endfor %}
     </tbody>

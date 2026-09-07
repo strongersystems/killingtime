@@ -6,6 +6,7 @@ times, pull counts and best percentages, so rivals don't need to publish their l
 Endpoints used:
     GET /api/v1/guilds/profile?region&realm&name&fields=raid_progression,raid_rankings
     GET /api/v1/raiding/static-data?expansion_id=N
+    GET /api/v1/mythic-plus/static-data?expansion_id=N  (season start/end dates)
     GET /api/v1/raiding/raid-rankings?raid&difficulty&region&realm&limit&page
     GET /api/v1/guilds/boss-kill?region&realm&guild&raid&boss&difficulty
 """
@@ -63,6 +64,11 @@ class RaiderIOClient:
 
     def static_data(self, expansion_id: int) -> dict:
         return self._get("/raiding/static-data", {"expansion_id": expansion_id})
+
+    def mythic_plus_static_data(self, expansion_id: int) -> dict:
+        """Season reference data. Used for the season cut-off: the date after which a kill no longer earns
+        Cutting Edge / Ahead of the Curve, which is also when the Mythic+ season ends."""
+        return self._get("/mythic-plus/static-data", {"expansion_id": expansion_id})
 
     def raid_rankings(
         self, raid: str, difficulty: str, region: str, realm: str | None = None, page: int = 0, limit: int = 100

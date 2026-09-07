@@ -188,3 +188,7 @@ tr.active td:nth-child(2)::after { content: " · in progress"; color: var(--warn
 
 .num-input { width: 4.5rem; padding: .3rem .4rem; }
 .peer-modes .filters { gap: .6rem; }
+
+tr.post td { color: var(--muted); }
+tr.post td:first-child::before { content: "✓ "; color: var(--muted); }
+.sub.achievement { margin-top: .6rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }

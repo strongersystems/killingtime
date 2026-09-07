@@ -210,6 +210,12 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("reports", "rankings_synced_at", "INTEGER"),
     # 0 when the same pull also appears in another report (two people logging the same raid); see sync.dedupe_fights.
     ("fights", "canonical", "INTEGER NOT NULL DEFAULT 1"),
+    # Tier window from Raider.IO: when the raid opened, when it closed, and the season cut-off after which a kill no
+    # longer earns Cutting Edge / Ahead of the Curve (M+ season end). All ms since epoch.
+    ("rio_raids", "starts_at", "INTEGER"),
+    ("rio_raids", "ends_at", "INTEGER"),
+    ("rio_raids", "season_slug", "TEXT"),
+    ("rio_raids", "cutoff_at", "INTEGER"),
 ]
 
 VIEWS = """
@@ -358,7 +364,7 @@ TABLE_DOCS: dict[str, str] = {
     "attendance / v_attendance": "Who attended each report (presence 1 = present); v_attendance adds team.",
     "parses / v_parses": "Warcraft Logs parses per player per kill: rank_percent (0-100 percentile for the spec), bracket_percent, amount, role, metric (dps or hps), team, kill_date.",
     "wcl_zone_rankings": "Warcraft Logs world/region/server rank for the home guild per zone (metric progress/speed/completeRaidSpeed).",
-    "rio_raids / rio_encounters": "Raider.IO raid and boss reference data (slugs).",
+    "rio_raids / rio_encounters": "Raider.IO raid and boss reference data (slugs). rio_raids.cutoff_at is the season cut-off (ms): a kill after it is post-season and earns no Cutting Edge / Ahead of the Curve.",
     "rio_summary": "Raider.IO 'X/Y M' summary per guild per raid.",
     "rio_rankings": "Raider.IO world/region/realm rank per guild, raid and difficulty (0 = unranked).",
     "rio_progress / v_rio_progress": "Raider.IO per-boss progress for ALL tracked guilds (home, rivals, realm leaderboard): first_defeated, num_pulls, best_percent. Use this to compare guilds.",

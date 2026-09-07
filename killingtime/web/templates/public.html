@@ -56,6 +56,7 @@
     .team .row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .35rem 0; border-top: 1px solid var(--border); font-size: .95rem; }
     .team .row:first-of-type { border-top: 0; }
     .pill { display: inline-block; padding: .05rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 700; border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
+    .pill.ce { color: var(--good); border-color: rgba(57,192,106,.5); font-size: .7rem; }
     .pill.m { color: var(--mythic); border-color: rgba(255,128,0,.5); } .pill.h { color: var(--heroic); border-color: rgba(163,53,238,.5); } .pill.n { color: var(--normal); border-color: rgba(30,143,255,.5); }
     table { width: 100%; border-collapse: collapse; font-size: .92rem; }
     th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -169,7 +170,10 @@
         {% for t in history %}
         {% set byd = {} %}{% for d in t.difficulties %}{% set _ = byd.update({d.difficulty: d}) %}{% endfor %}
         <tr><td><b>{{ t.name }}</b></td><td class="muted">{{ t.expansion or '' }}</td>
-          {% for code in (5, 4, 3) %}<td>{% if byd[code] %}<span class="pill {{ DIFFICULTIES[code][0]|lower }}">{{ byd[code].killed }}/{{ byd[code].total }}</span>{% if byd[code].cleared %} <span class="muted">{{ byd[code].last_kill_date }}</span>{% endif %}{% else %}—{% endif %}</td>{% endfor %}
+          {% for code in (5, 4, 3) %}<td>{% if byd[code] %}<span class="pill {{ DIFFICULTIES[code][0]|lower }}">{{ byd[code].killed }}/{{ byd[code].total }}</span>
+            {%- if byd[code].tier_over and byd[code].achievement_earned %} <span class="pill ce" title="{{ byd[code].achievement }}">{{ 'CE' if code == 5 else 'AOTC' }}</span>{% endif %}
+            {%- if byd[code].post_season %} <span class="muted" title="{{ byd[code].post_season }} boss(es) killed after the season ended, so no {{ byd[code].achievement }}">+{{ byd[code].post_season }} post</span>{% endif %}
+            {%- if byd[code].cleared %} <span class="muted">{{ byd[code].last_kill_date }}</span>{% endif %}{% else %}—{% endif %}</td>{% endfor %}
           <td class="num">{% if t.ranks.mythic %}#{{ t.ranks.mythic.realm }} realm{% if t.ranks.mythic.world %} · #{{ t.ranks.mythic.world|num }} world{% endif %}{% elif t.ranks.wcl %}#{{ t.ranks.wcl.world|num }} world (WCL){% else %}—{% endif %}</td>
           <td class="num">{% if t.ranks.heroic %}#{{ t.ranks.heroic.realm }} realm{% if t.ranks.heroic.world %} · #{{ t.ranks.heroic.world|num }} world{% endif %}{% else %}—{% endif %}</td>
           <td class="muted">{{ t.first }} → {{ t.last }}</td></tr>

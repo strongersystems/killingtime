@@ -20,6 +20,13 @@
     <div class="value">{{ summary.killed }}<span class="muted">/{{ summary.total_bosses }}</span></div>
     <div class="progress {{ summary.difficulty_name|lower }}"><span style="width: {{ (100 * summary.killed / summary.total_bosses) if summary.total_bosses else 0 }}%"></span></div>
     <div class="sub">{% if summary.cleared %}Cleared on {{ summary.last_kill_date }}{% elif summary.next_boss %}Working on <b>{{ summary.next_boss.name }}</b>{% if summary.next_boss.best_pct is not none %} · best pull {{ summary.next_boss.best_pct|round(1) }}% left{% endif %}{% if summary.next_boss.total_pulls %} · {{ summary.next_boss.total_pulls }} pulls so far{% endif %}{% else %}No pulls yet at this difficulty{% endif %}</div>
+    {% if summary.tier_over and summary.achievement %}
+    <div class="sub achievement">
+      {% if summary.achievement_earned %}<span class="pill good">{{ summary.achievement }} ✓</span>{% else %}<span class="pill bad">No {{ summary.achievement }}</span>{% endif %}
+      <span class="muted">season ended {{ summary.cutoff_date }}</span>
+      {% if summary.post_season_kills %}<span class="muted">· {{ summary.post_season_kills|length }} killed after: {% for k in summary.post_season_kills %}{{ k.boss }} ({{ k.date }}){{ ', ' if not loop.last }}{% endfor %} — {{ summary.killed_all_time }}/{{ summary.total_bosses }} all time</span>{% endif %}
+    </div>
+    {% endif %}
     <div class="diff-strip">
       {% for d in difficulties %}<a href="{{ link(request.url.path, tier=zone_id, d=d.code) }}" class="{{ 'active' if d.active }}"><span class="pill {{ d.name|lower }}">{{ d.name }}</span> {{ d.killed }}/{{ d.total }}{% if d.cleared %} ✓{% endif %}</a>{% endfor %}
     </div>
@@ -44,9 +51,9 @@
     <tbody>
     {% for b in summary.bosses %}
     {% set p = b.peer %}
-    <tr class="{{ 'killed' if b.killed_any else ('active' if b.total_pulls) }}">
+    <tr class="{{ 'killed' if b.counts else ('post' if b.post_season else ('active' if b.total_pulls)) }}">
       <td>{{ b.ord }}</td><td><b>{{ b.name }}</b></td>
-      <td>{% if b.first_kill_date %}{{ b.first_kill_date }}{% elif b.log_missing %}{{ b.rio_first_kill_date or 'killed' }} <span class="pill" title="Raider.IO credits the guild with this kill, but it is not in our Warcraft Logs reports - the night was logged personally or never uploaded.">no log</span>{% elif b.total_pulls %}in progress{% else %}—{% endif %}</td>
+      <td>{% if b.post_season %}{{ b.kill_date }} <span class="pill bad" title="Killed after the season ended, so it earns no {{ summary.achievement or 'achievement' }} and is not counted as tier progress.">post-season</span>{% elif b.kill_date %}{{ b.kill_date }}{% if b.log_missing %} <span class="pill" title="Raider.IO credits the guild with this kill, but it is not in our Warcraft Logs reports - the night was logged personally or never uploaded.">no log</span>{% endif %}{% elif b.total_pulls %}in progress{% else %}—{% endif %}</td>
       <td class="num">{% if b.killed %}{{ b.pulls_to_kill }}{% elif b.log_missing %}—{% elif b.total_pulls %}{{ b.total_pulls }}+{% else %}—{% endif %}</td>
       <td class="num">{{ b.nights_to_kill or '—' }}</td>
       <td class="num">{{ (b.best_pct|num(1) ~ '%') if b.best_pct is not none else '—' }}</td>
@@ -64,6 +71,9 @@
   </div>
   {% if summary.unlogged_kills %}
   <p class="muted">{{ summary.unlogged_kills|length }} of these kills ({{ summary.unlogged_kills|join(', ') }}) come from Raider.IO only: the guild is credited with them, but the night is not in our Warcraft Logs reports, so they have no pull count here.</p>
+  {% endif %}
+  {% if summary.post_season_kills %}
+  <p class="muted">Progress is counted as it stood at the season cut-off ({{ summary.cutoff_date }}), the date {{ summary.achievement or 'the achievement' }}, Ahead of the Curve and the Mythic+ season end. Kills after it still happened, but they earn no achievement and do not count as tier progress.</p>
   {% endif %}
   <p class="muted">Pulls to kill counts every pull up to and including the first kill ("+" = still in progress). Peer columns compare with guilds at a similar kill count on Raider.IO:
     <b>out-pulled</b> is the share of those guilds that needed more pulls than {{ 'we' if not team else 'this team' }} did; <b>day</b> is days from the first pull in the raid to the kill.</p>

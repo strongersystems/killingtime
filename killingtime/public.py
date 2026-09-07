@@ -84,6 +84,9 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
                 {
                     "difficulty": d, "name": DIFFICULTIES[d], "killed": s["killed"], "total": s["total_bosses"],
                     "cleared": s["cleared"], "pulls": s["pulls"], "nights": s["nights"],
+                    "achievement": s["achievement"], "achievement_earned": s["achievement_earned"],
+                    "tier_over": s["tier_over"], "cutoff_date": s["cutoff_date"],
+                    "post_season": len(s["post_season_kills"]), "killed_all_time": s["killed_all_time"],
                     "next_boss": s["next_boss"]["name"] if s["next_boss"] else None,
                     "next_best_pct": round(s["next_boss"]["best_pct"], 1) if s["next_boss"] and s["next_boss"]["best_pct"] is not None else None,
                     "first_pull_date": s["first_pull_date"], "last_kill_date": s["last_kill_date"],

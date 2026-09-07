@@ -88,7 +88,9 @@ def test_tier_metrics(synced):
     conn, *_ = synced
     tiers = metrics.tiers(conn)
     assert [t["id"] for t in tiers] == [46, 44]
-    assert tiers[1]["kills"] == {5: 3} and tiers[1]["summary"] == "3/3 M"
+    # Dimensius died on 2026-05-14, after the season cut-off (2026-05-10), so the tier stands at 2/3
+    assert tiers[1]["kills"] == {5: 2} and tiers[1]["summary"] == "2/3 M"
+    assert tiers[1]["cutoff_date"] == "2026-05-10"
     assert tiers[0]["kills"] == {5: 1, 4: 3}
     s = metrics.tier_summary(conn, 46, 5)
     assert s["killed"] == 1 and s["total_bosses"] == 3 and s["pulls"] == 7 and s["wipes"] == 6
@@ -99,7 +101,7 @@ def test_tier_metrics(synced):
     cmp = metrics.tier_comparison(conn, 5)
     prev = next(c for c in cmp if c["zone_id"] == 44)
     assert [b["cum_pulls"] for b in prev["bosses"]] == [4, 10, 20]
-    assert prev["days_to_latest_kill"] == 9.0
+    assert prev["days_to_latest_kill"] == 2.0  # the post-season kill does not extend the tier
     nights = metrics.raid_nights(conn, 44)
     assert nights[0]["pull_date"] == "2026-05-14" and nights[0]["kills"] == 2 and nights[0]["wipes"] == 3
     att = metrics.attendance_summary(conn, 46)

@@ -273,3 +273,40 @@ def test_raiderio_fills_kills_missing_from_logs(synced):
     cmp = metrics.peer_comparison(conn, "the-venomous-abyss", 5)
     ula_peer = next(b for b in cmp["bosses"] if b["slug"] == "ulatek")
     assert ula_peer["killed"] is True and ula_peer["our_pulls"] is None
+
+
+def test_season_cutoff_excludes_post_season_kills(synced):
+    """A kill after the season ended is a clear, but not tier progress and no Cutting Edge."""
+    conn, *_ = synced
+    assert metrics.zone_cutoff(conn, 44) is not None and metrics.zone_cutoff(conn, 46) is None  # 46 is the live tier
+    s = metrics.tier_summary(conn, 44, 5)
+    assert s["killed"] == 2 and s["killed_all_time"] == 3 and s["cleared"] is False
+    assert s["cutoff_date"] == "2026-05-10" and s["tier_over"] is True
+    assert s["post_season_kills"] == [{"boss": "Dimensius", "date": "2026-05-14"}]
+    assert s["achievement"] == "Cutting Edge" and s["achievement_earned"] is False
+    assert s["next_boss"]["name"] == "Dimensius"  # the final boss is still what the tier ended on
+    dim = next(b for b in s["bosses"] if b["name"] == "Dimensius")
+    assert dim["post_season"] is True and dim["killed_any"] is True and dim["counts"] is False
+    # the live tier has no cut-off, so nothing is post-season and the achievement is still open
+    cur = metrics.tier_summary(conn, 46, 4)
+    assert cur["post_season_kills"] == [] and cur["tier_over"] is False
+    assert cur["achievement"] == "Ahead of the Curve" and cur["achievement_earned"] is True
+    assert metrics.tier_summary(conn, 46, 5)["achievement"] == "Cutting Edge"
+
+
+def test_season_cutoff_from_raider_io_seasons():
+    from killingtime.sync import season_cutoffs
+
+    seasons = [
+        {"slug": "season-tww-3", "starts": {"eu": "2025-08-13T04:00:00Z"}, "ends": {"eu": "2026-03-02T22:00:00Z"}},
+        {"slug": "season-tww-3-cutoffs", "starts": {"eu": "2025-08-13T04:00:00Z"}, "ends": {"eu": "2026-01-20T21:00:00Z"}},
+        {"slug": "season-df-4", "starts": {"eu": "2024-04-24T04:00:00Z"}, "ends": {"eu": "2024-08-26T22:00:00Z"}},
+        {"slug": "season-df-4-post", "starts": {"eu": "2024-07-24T04:00:00Z"}, "ends": {"eu": "2024-08-26T22:00:00Z"}},
+        {"slug": "season-tww-2", "starts": {"eu": "2025-03-05T04:00:00Z"}, "ends": {"eu": "2025-08-13T04:00:00Z"}},
+    ]
+    got = {s["slug"]: metrics.ms_to_date(s["cutoff"]) for s in season_cutoffs(seasons, "eu")}
+    assert got == {
+        "season-tww-3": "2026-01-20",  # the -cutoffs variant, not the later season end
+        "season-df-4": "2024-07-24",   # the -post season starts at the cut-off
+        "season-tww-2": "2025-08-13",  # no variant: the season end is the cut-off
+    }
