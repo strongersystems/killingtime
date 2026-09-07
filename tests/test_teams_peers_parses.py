@@ -335,3 +335,21 @@ def test_pulls_to_kill_uses_the_true_first_kill(synced):
     assert ent["pulls_to_kill"] == 1  # but only the one before the real kill is progression
     assert ent["nights_to_kill"] == 1
     assert after["killed"] == 2 and after["next_boss"]["name"] == "Ulatek"
+
+
+def test_peers_respect_the_cutoff_and_declare_untracked_bosses(synced):
+    """The Raider.IO fallback must not count a post-season kill, and a boss Raider.IO does not track is declared."""
+    conn, *_ = synced
+    # Manaforge: our logs hold the pulls, and Dimensius died post-season
+    cmp = metrics.peer_comparison(conn, "manaforge-omega", 5)
+    assert cmp["our_kills"] == 2 and cmp["total_bosses"] == 3
+    dim = next(b for b in cmp["bosses"] if b["slug"] == "dimensius")
+    assert dim["killed"] is False  # killed after the cut-off
+    # drop our logs for the raid so the Raider.IO fallback is used, and check it applies the cut-off too
+    conn.execute("DELETE FROM fights WHERE report_code IN (SELECT code FROM reports WHERE zone_id = 44)")
+    conn.commit()
+    fallback = metrics.peer_comparison(conn, "manaforge-omega", 5)
+    assert fallback["source"] == "raider.io" and fallback["our_kills"] == 2
+    assert next(b for b in fallback["bosses"] if b["slug"] == "dimensius")["killed"] is False
+    assert metrics.raid_cutoff(conn, "manaforge-omega") is not None
+    assert metrics.raid_cutoff(conn, "the-venomous-abyss") is None  # season still running

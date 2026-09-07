@@ -11,7 +11,8 @@
     {% if cmp.mode == 'rank' %}{{ cmp.peer_count }} {{ settings.guild_realm }} guilds from {{ cmp.above }} places above to {{ cmp.below }} below our realm rank{% if cmp.our_rank %} (#{{ cmp.our_rank }}{{ ', estimated from this team\'s kills' if cmp.rank_estimated }}){% endif %}.
     {% elif cmp.mode == 'cohort' %}{% if cmp.prev and cmp.prev.our_rank %}the {{ cmp.peer_count }} {{ settings.guild_realm }} guilds that were within {{ cmp.above }} above / {{ cmp.below }} below our #{{ cmp.prev.our_rank }}{{ ' (estimated)' if cmp.prev.estimated }} in {{ cmp.prev.raid_name }}, and where they are in {{ raid.name }} now{% if cmp.prev.missing %} ({{ cmp.prev.missing }} of them have no progress here yet){% endif %}.{% else %}no rank for us in the previous tier, so no cohort to follow.{% endif %}
     {% else %}{{ cmp.peer_count }} guilds within ±{{ cmp.band }} boss{{ 'es' if cmp.band != 1 }} of our {{ cmp.our_kills }}/{{ cmp.total_bosses }} on Raider.IO (realm leaderboard and rivals), nearest ranks first.{% endif %}
-    Our pulls come from {{ 'our logs' if cmp.source == 'logs' else 'Raider.IO' }}.</small></div>
+    Our pulls come from {{ 'our logs' if cmp.source == 'logs' else 'Raider.IO' }}.
+    {% if cmp.untracked_bosses %}Raider.IO does not track {{ cmp.untracked_bosses|join(', ') }}, so this page compares the other {{ cmp.total_bosses }} bosses only.{% endif %}</small></div>
   <div class="filters">
     <form method="get" action="{{ request.url.path }}">
       <select class="control" name="raid" onchange="this.form.submit()">

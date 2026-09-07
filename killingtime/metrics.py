@@ -106,6 +106,13 @@ def _before_cutoff(cutoff: int | None, column: str = "start_time") -> tuple[str,
     return (f" AND {column} <= ?", (cutoff,)) if cutoff else ("", ())
 
 
+def raid_cutoff(conn: sqlite3.Connection, raid_slug: str) -> int | None:
+    """Season cut-off for a Raider.IO raid, for raids we hold no logs for. See ``zone_cutoff``."""
+    row = conn.execute("SELECT cutoff_at FROM rio_raids WHERE slug = ?", (raid_slug,)).fetchone()
+    cutoff = int(row["cutoff_at"]) if row and row["cutoff_at"] else None
+    return cutoff if (cutoff and cutoff <= int(datetime.now(UTC).timestamp() * 1000)) else None
+
+
 def zone_cutoff(conn: sqlite3.Connection, zone_id: int) -> int | None:
     """The season cut-off for a tier (ms), after which a kill earns no Cutting Edge / Ahead of the Curve.
     None while the tier is still running (a cut-off in the future, including Raider.IO's far-future placeholder for
@@ -590,11 +597,14 @@ def _our_boss_progress(conn: sqlite3.Connection, raid_slug: str, difficulty: int
     home = home_guild(conn)
     if not home:
         return out
+    cutoff = raid_cutoff(conn, raid_slug)
     for p in _rows(conn, "SELECT * FROM rio_progress WHERE guild_id = ? AND raid_slug = ? AND difficulty = ?", (home["id"], raid_slug, difficulty)):
+        # The season cut-off applies here too: a post-season clear is not tier progress.
+        killed = bool(p["is_defeated"]) and not (cutoff and p["first_defeated"] and p["first_defeated"] > cutoff)
         out[p["encounter_slug"]] = {
-            "killed": bool(p["is_defeated"]),
+            "killed": killed,
             "pulls": p["num_pulls"] or None,
-            "first_kill_ms": p["first_defeated"],
+            "first_kill_ms": p["first_defeated"] if killed else None,
             "started_ms": p["pull_started_at"] or p["first_defeated"],
             "source": "raider.io",
         }
@@ -685,6 +695,13 @@ def peer_comparison(
     Per boss: our pulls vs the peers' average/median/quartiles, the share of peers we out-pulled (percentile), and
     days from the guild's first pull in the raid to the kill vs the peers' typical."""
     bosses = _rows(conn, "SELECT slug, name, ord FROM rio_encounters WHERE raid_slug = ? ORDER BY ord", (raid_slug,))
+    # Raider.IO occasionally lists fewer bosses than Warcraft Logs, so say which ones the comparison leaves out.
+    untracked = [
+        r["name"] for r in _rows(
+            conn,
+            """SELECT e.name FROM encounters e JOIN zones z ON z.id = e.zone_id
+               WHERE z.rio_raid_slug = ? AND e.rio_encounter_slug IS NULL ORDER BY e.ord""", (raid_slug,))
+    ]
     home = home_guild(conn)
     home_id = home["id"] if home else -1
     ours = _our_boss_progress(conn, raid_slug, difficulty, team)
@@ -789,6 +806,7 @@ def peer_comparison(
         "source": next((v["source"] for v in ours.values()), None),
         "our_kills": our_kills,
         "total_bosses": len(bosses),
+        "untracked_bosses": untracked,
         "band": band,
         "mode": mode,
         "mode_label": PEER_MODES.get(mode, mode),
