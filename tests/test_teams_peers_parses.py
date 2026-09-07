@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import httpx
+from conftest import ms
 from fastapi.testclient import TestClient
 
 from killingtime import metrics, state
@@ -310,3 +311,27 @@ def test_season_cutoff_from_raider_io_seasons():
         "season-df-4": "2024-07-24",   # the -post season starts at the cut-off
         "season-tww-2": "2025-08-13",  # no variant: the season end is the cut-off
     }
+
+
+def test_pulls_to_kill_uses_the_true_first_kill(synced):
+    """Guild logs can be late on a first kill, so later farm wipes must not count as progression pulls."""
+    conn, *_ = synced
+    home = metrics.home_guild(conn)["id"]
+    before = metrics.tier_summary(conn, 46, 5)
+    ent = next(b for b in before["bosses"] if b["name"] == "Entombed Sentinels")
+    assert ent["total_pulls"] == 4 and not ent["killed_any"]  # 1 pull on 08-30, 3 more on 09-02, no logged kill
+    # Raider.IO says the guild actually killed it on the first night; our logs never saw that kill.
+    conn.execute(
+        """INSERT OR REPLACE INTO rio_progress(guild_id, raid_slug, difficulty, encounter_slug, first_defeated,
+               last_defeated, num_pulls, best_percent, is_defeated, pull_started_at, fetched_at)
+           VALUES (?, 'the-venomous-abyss', 5, 'entombed-sentinels', ?, NULL, 1, 0, 1, NULL, 0)""",
+        (home, ms("2026-08-30", 19) + 20 * 60 * 1000),
+    )
+    conn.commit()
+    after = metrics.tier_summary(conn, 46, 5)
+    ent = next(b for b in after["bosses"] if b["name"] == "Entombed Sentinels")
+    assert ent["killed_any"] and ent["log_missing"] and ent["kill_date"] == "2026-08-30"
+    assert ent["total_pulls"] == 4  # every pull is still counted for the tier
+    assert ent["pulls_to_kill"] == 1  # but only the one before the real kill is progression
+    assert ent["nights_to_kill"] == 1
+    assert after["killed"] == 2 and after["next_boss"]["name"] == "Ulatek"

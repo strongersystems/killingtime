@@ -68,10 +68,10 @@ def rio_kills_for_zone(conn: sqlite3.Connection, zone_id: int, difficulty: int) 
     Raider.IO is the record of what the guild actually killed. Our own Warcraft Logs data only covers reports
     uploaded to the guild, so it can miss kills that were logged personally or never uploaded."""
     return {
-        r["encounter_id"]: {"killed": bool(r["is_defeated"]), "first_kill_ms": r["first_defeated"]}
+        r["encounter_id"]: {"killed": bool(r["is_defeated"]), "first_kill_ms": r["first_defeated"], "pulls": r["num_pulls"]}
         for r in _rows(
             conn,
-            """SELECT e.id AS encounter_id, p.is_defeated, p.first_defeated
+            """SELECT e.id AS encounter_id, p.is_defeated, p.first_defeated, p.num_pulls
                FROM encounters e
                JOIN zones z ON z.id = e.zone_id
                JOIN rio_progress p ON p.raid_slug = z.rio_raid_slug AND p.encounter_slug = e.rio_encounter_slug
@@ -101,6 +101,11 @@ def _rio_kill_counts(conn: sqlite3.Connection, zone_id: int, cutoff: int | None 
     }
 
 
+def _before_cutoff(cutoff: int | None, column: str = "start_time") -> tuple[str, tuple]:
+    """SQL fragment keeping only rows from before a tier's season cut-off."""
+    return (f" AND {column} <= ?", (cutoff,)) if cutoff else ("", ())
+
+
 def zone_cutoff(conn: sqlite3.Connection, zone_id: int) -> int | None:
     """The season cut-off for a tier (ms), after which a kill earns no Cutting Edge / Ahead of the Curve.
     None while the tier is still running (a cut-off in the future, including Raider.IO's far-future placeholder for
@@ -122,22 +127,27 @@ def tiers(conn: sqlite3.Connection, team: str | None = None) -> list[dict[str, A
         f"""
         SELECT z.id, z.name, z.frozen, z.rio_raid_slug, x.name AS expansion,
                (SELECT COUNT(*) FROM encounters e WHERE e.zone_id = z.id) AS bosses,
-               (SELECT COUNT(*) FROM reports r {team_join} WHERE r.zone_id = z.id) AS reports,
-               (SELECT MIN(start_time) FROM reports r {team_join} WHERE r.zone_id = z.id) AS first_report,
-               (SELECT MAX(end_time) FROM reports r {team_join} WHERE r.zone_id = z.id) AS last_report,
-               rr.cutoff_at
-        FROM zones z LEFT JOIN expansions x ON x.id = z.expansion_id LEFT JOIN rio_raids rr ON rr.slug = z.rio_raid_slug
+               z.rio_raid_slug AS slug
+        FROM zones z LEFT JOIN expansions x ON x.id = z.expansion_id
         WHERE EXISTS (SELECT 1 FROM reports r {team_join} WHERE r.zone_id = z.id)
         ORDER BY z.id DESC
         """,
-        tp * 4,
+        tp,
     )
     for r in rows:
         cutoff = zone_cutoff(conn, r["id"])
+        cut_sql, cut_p = _before_cutoff(cutoff, "r.start_time")
+        # A tier's raid nights stop at the season cut-off too, so a post-season farm night does not extend it.
+        rep = conn.execute(
+            f"""SELECT COUNT(*) AS reports, MIN(r.start_time) AS first_report, MAX(r.end_time) AS last_report
+                FROM reports r {team_join} WHERE r.zone_id = ?{cut_sql}""",
+            (*tp, r["id"], *cut_p),
+        ).fetchone()
+        r["reports"], r["first_report"], r["last_report"] = rep["reports"], rep["first_report"], rep["last_report"]
         kills = _rows(
             conn,
             f"""SELECT difficulty, SUM(CASE WHEN killed = 1 AND (? IS NULL OR first_kill_time <= ?) THEN 1 ELSE 0 END) AS killed
-                FROM {fk} WHERE zone_id = ?{tf} GROUP BY difficulty""",
+                FROM {fk} WHERE zone_id = ? AND difficulty IN (1, 3, 4, 5){tf} GROUP BY difficulty""",
             (cutoff, cutoff, r["id"], *tp),
         )
         r["cutoff"] = cutoff
@@ -170,35 +180,43 @@ def best_difficulty(conn: sqlite3.Connection, zone_id: int, team: str | None = N
 
 
 def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: str | None = None) -> dict[str, Any]:
+    """How a tier went at one difficulty.
+
+    Two rules make the numbers match what the guild remembers:
+
+    * **The season cut-off.** Once a tier is over, nothing after the cut-off counts - not kills, not pulls, not raid
+      nights. A boss killed later is a post-season clear (see ``post_season_kills``).
+    * **The true first kill.** A boss's first kill is the earliest either source knows about: our Warcraft Logs
+      reports or Raider.IO. Guild logs miss nights that were logged personally, so taking the log date alone would
+      count later farm wipes as progression pulls.
+    """
     fk, _, tf, tp = _scope(team)
     fk_team = " AND fk.team = ?" if team else ""
+    cutoff = zone_cutoff(conn, zone_id)
+    cut_sql, cut_p = _before_cutoff(cutoff, "start_time")
     zone = conn.execute("SELECT * FROM zones WHERE id = ?", (zone_id,)).fetchone()
     bosses = _rows(
         conn,
-        f"""
-        SELECT e.id, e.name, e.ord, e.rio_encounter_slug, fk.killed, fk.first_kill_time, fk.first_kill_date, fk.pulls_to_kill,
-               fk.wipes_before_kill, fk.best_wipe_pct, fk.nights_to_kill, fk.hours_to_kill, fk.first_pull_time,
-               (SELECT COUNT(*) FROM v_pulls p WHERE p.encounter_id = e.id AND p.difficulty = ?{tf}) AS total_pulls,
-               (SELECT SUM(kill) FROM v_pulls p WHERE p.encounter_id = e.id AND p.difficulty = ?{tf}) AS total_kills,
-               (SELECT MIN(fight_pct) FROM v_pulls p WHERE p.encounter_id = e.id AND p.difficulty = ?{tf} AND kill = 0) AS best_pct
-        FROM encounters e
-        LEFT JOIN {fk} fk ON fk.encounter_id = e.id AND fk.difficulty = ?{fk_team}
-        WHERE e.zone_id = ?
-        ORDER BY e.ord
-        """,
-        (difficulty, *tp, difficulty, *tp, difficulty, *tp, difficulty, *tp, zone_id),
+        f"""SELECT e.id, e.name, e.ord, e.rio_encounter_slug, fk.killed, fk.first_kill_time, fk.first_kill_date
+            FROM encounters e
+            LEFT JOIN {fk} fk ON fk.encounter_id = e.id AND fk.difficulty = ?{fk_team}
+            WHERE e.zone_id = ? ORDER BY e.ord""",
+        (difficulty, *tp, zone_id),
     )
-    totals = conn.execute(
-        f"""SELECT COUNT(*) AS pulls, SUM(kill) AS kills, COUNT(DISTINCT pull_date) AS nights,
-                   SUM(duration_s)/3600.0 AS hours, MIN(start_time) AS first_pull, MAX(end_time) AS last_pull,
-                   AVG(avg_ilvl) AS avg_ilvl
-            FROM v_pulls WHERE zone_id = ? AND difficulty = ?{tf}""",
-        (zone_id, difficulty, *tp),
-    ).fetchone()
     rio = rio_kills_for_zone(conn, zone_id, difficulty) if not team else {}
-    cutoff = zone_cutoff(conn, zone_id)
+    pulls = _rows(
+        conn,
+        f"""SELECT encounter_id, start_time, kill, fight_pct, duration_s, pull_date, avg_ilvl
+            FROM v_pulls WHERE zone_id = ? AND difficulty = ?{tf}{cut_sql} ORDER BY start_time""",
+        (zone_id, difficulty, *tp, *cut_p),
+    )
+    by_boss: dict[int, list[dict]] = {}
+    for p in pulls:
+        by_boss.setdefault(p["encounter_id"], []).append(p)
+
     for b in bosses:
         r = rio.get(b["id"], {})
+        mine = by_boss.get(b["id"], [])
         b["rio_killed"] = bool(r.get("killed"))
         b["rio_first_kill_date"] = ms_to_date(r.get("first_kill_ms"))
         b["killed_any"] = bool(b["killed"]) or b["rio_killed"]
@@ -206,10 +224,25 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         b["log_missing"] = b["rio_killed"] and not b["killed"]
         b["kill_ms"] = min([t for t in (b["first_kill_time"], r.get("first_kill_ms") if b["rio_killed"] else None) if t], default=None)
         b["kill_date"] = ms_to_date(b["kill_ms"])
-        # Killed after the season ended: it counts as a clear, but earns no Cutting Edge / Ahead of the Curve and is
-        # not part of how the tier actually went.
+        # Killed after the season ended: a clear, but no Cutting Edge / Ahead of the Curve and not tier progress.
         b["post_season"] = bool(b["killed_any"] and cutoff and b["kill_ms"] and b["kill_ms"] > cutoff)
         b["counts"] = b["killed_any"] and not b["post_season"]
+        b["total_pulls"] = len(mine)
+        b["total_kills"] = sum(1 for p in mine if p["kill"])
+        b["first_pull_time"] = mine[0]["start_time"] if mine else None
+        wipe_pcts = [p["fight_pct"] for p in mine if not p["kill"] and p["fight_pct"] is not None]
+        b["best_pct"] = min(wipe_pcts) if wipe_pcts else None
+        # Progression = everything up to and including the first kill; later wipes on a farm boss are not progression.
+        prog = [p for p in mine if b["kill_ms"] and p["start_time"] <= b["kill_ms"]] if b["counts"] else []
+        prog_wipes = [p["fight_pct"] for p in prog if not p["kill"] and p["fight_pct"] is not None]
+        b["pulls_to_kill"] = len(prog) or None
+        # Progression that never reached our guild logs: Raider.IO still counted the pulls.
+        b["rio_pulls"] = r.get("pulls") if b["counts"] and not b["pulls_to_kill"] else None
+        b["wipes_before_kill"] = sum(1 for p in prog if not p["kill"]) if prog else None
+        b["nights_to_kill"] = len({p["pull_date"] for p in prog}) or None
+        b["hours_to_kill"] = round(sum(p["duration_s"] or 0 for p in prog) / 3600.0, 2) if prog else None
+        b["best_wipe_pct"] = min(prog_wipes) if prog_wipes else None
+
     killed_logged = sum(1 for b in bosses if b["killed"] and not b["post_season"])
     killed = sum(1 for b in bosses if b["counts"])
     killed_all_time = sum(1 for b in bosses if b["killed_any"])
@@ -217,7 +250,9 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
     post_season = [{"boss": b["name"], "date": b["kill_date"]} for b in bosses if b["post_season"]]
     final_boss = bosses[-1] if bosses else None
     earned = bool(final_boss and final_boss["counts"])
-    first_pull = totals["first_pull"]
+    ilvls = [p["avg_ilvl"] for p in pulls if p["avg_ilvl"]]
+    first_pull = pulls[0]["start_time"] if pulls else None
+    last_pull = max((p["start_time"] for p in pulls), default=None)
     # "Latest kill" means the tier's progression, so a post-season clear does not extend it.
     last_kill = max((b["kill_ms"] for b in bosses if b["counts"] and b["kill_ms"]), default=None)
     days_to_current = (last_kill - first_pull) / DAY_MS if (first_pull and last_kill) else None
@@ -240,14 +275,14 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         "achievement_earned": earned if difficulty in (4, 5) else None,
         "total_bosses": len(bosses),
         "cleared": killed == len(bosses) and killed > 0,
-        "pulls": totals["pulls"] or 0,
-        "kills": totals["kills"] or 0,
-        "wipes": (totals["pulls"] or 0) - (totals["kills"] or 0),
-        "nights": totals["nights"] or 0,
-        "hours": round(totals["hours"] or 0, 1),
-        "avg_ilvl": round(totals["avg_ilvl"], 1) if totals["avg_ilvl"] else None,
+        "pulls": len(pulls),
+        "kills": sum(1 for p in pulls if p["kill"]),
+        "wipes": sum(1 for p in pulls if not p["kill"]),
+        "nights": len({p["pull_date"] for p in pulls}),
+        "hours": round(sum(p["duration_s"] or 0 for p in pulls) / 3600.0, 1),
+        "avg_ilvl": round(sum(ilvls) / len(ilvls), 1) if ilvls else None,
         "first_pull_date": ms_to_date(first_pull),
-        "last_pull_date": ms_to_date(totals["last_pull"]),
+        "last_pull_date": ms_to_date(last_pull),
         "last_kill_date": ms_to_date(last_kill),
         "days_to_latest_kill": round(days_to_current, 1) if days_to_current is not None else None,
         "next_boss": next((b for b in bosses if not b["counts"]), None),
@@ -257,14 +292,18 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
 def progress_timeline(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: str | None = None) -> list[dict[str, Any]]:
     """Cumulative bosses killed by day, plus day index since our first pull in this zone/difficulty."""
     fk, _, tf, tp = _scope(team)
+    cutoff = zone_cutoff(conn, zone_id)
+    cut_sql, cut_p = _before_cutoff(cutoff, "start_time")
     first = conn.execute(
-        f"SELECT MIN(start_time) AS t FROM v_pulls WHERE zone_id = ? AND difficulty = ?{tf}", (zone_id, difficulty, *tp)
+        f"SELECT MIN(start_time) AS t FROM v_pulls WHERE zone_id = ? AND difficulty = ?{tf}{cut_sql}",
+        (zone_id, difficulty, *tp, *cut_p),
     ).fetchone()["t"]
+    kill_cut, kill_p = _before_cutoff(cutoff, "first_kill_time")
     kills = _rows(
         conn,
         f"""SELECT encounter_name, first_kill_time FROM {fk}
-            WHERE zone_id = ? AND difficulty = ? AND killed = 1{tf} ORDER BY first_kill_time""",
-        (zone_id, difficulty, *tp),
+            WHERE zone_id = ? AND difficulty = ? AND killed = 1{tf}{kill_cut} ORDER BY first_kill_time""",
+        (zone_id, difficulty, *tp, *kill_p),
     )
     out = []
     for i, k in enumerate(kills, start=1):
@@ -294,11 +333,11 @@ def tier_comparison(conn: sqlite3.Connection, difficulty: int, team: str | None 
                 {
                     "ord": b["ord"],
                     "boss": b["name"],
-                    "killed": bool(b["killed"]),
+                    "killed": bool(b["counts"]),
                     "pulls_to_kill": b["pulls_to_kill"],
                     "cum_pulls": cum_pulls,
-                    "days_to_kill": round((b["first_kill_time"] - first_pull) / DAY_MS, 1)
-                    if (b["killed"] and first_pull)
+                    "days_to_kill": round((b["kill_ms"] - first_pull) / DAY_MS, 1)
+                    if (b["counts"] and b["kill_ms"] and first_pull)
                     else None,
                     "nights_to_kill": b["nights_to_kill"],
                 }
@@ -325,30 +364,32 @@ def raid_nights(conn: sqlite3.Connection, zone_id: int, limit: int = 60, team: s
     _, rn, tf, tp = _scope(team)
     n_team = " AND n.team = ?" if team else ""
     p_team = " AND p.team = n.team" if team else ""
+    cut_sql, cut_p = _before_cutoff(zone_cutoff(conn, zone_id), "n.first_pull_time")
     return _rows(
         conn,
         f"""SELECT pull_date, difficulty, pulls, kills, wipes, bosses_pulled, ROUND(hours_in_combat, 2) AS hours_in_combat,
                    ROUND(avg_ilvl, 1) AS avg_ilvl,
                    (SELECT GROUP_CONCAT(DISTINCT encounter_name) FROM v_pulls p
                      WHERE p.zone_id = n.zone_id AND p.difficulty = n.difficulty AND p.pull_date = n.pull_date AND p.kill = 1{p_team}) AS killed_bosses
-            FROM {rn} n WHERE zone_id = ?{n_team} ORDER BY pull_date DESC, difficulty DESC LIMIT ?""",
-        (zone_id, *tp, limit),
+            FROM {rn} n WHERE zone_id = ?{n_team}{cut_sql} ORDER BY pull_date DESC, difficulty DESC LIMIT ?""",
+        (zone_id, *tp, *cut_p, limit),
     )
 
 
 def attendance_summary(conn: sqlite3.Connection, zone_id: int, team: str | None = None) -> dict[str, Any]:
     _, _, tf, tp = _scope(team)
+    cut_sql, cut_p = _before_cutoff(zone_cutoff(conn, zone_id), "start_time")
     # Raids are counted by date: two people logging the same night produce two reports of one raid.
     total_raids = conn.execute(
-        f"SELECT COUNT(DISTINCT raid_date) AS c FROM v_attendance WHERE zone_id = ?{tf}", (zone_id, *tp)
+        f"SELECT COUNT(DISTINCT raid_date) AS c FROM v_attendance WHERE zone_id = ?{tf}{cut_sql}", (zone_id, *tp, *cut_p)
     ).fetchone()["c"]
     players = _rows(
         conn,
         f"""SELECT player_name, player_class, COUNT(DISTINCT raid_date) AS raids,
                    ROUND(100.0 * COUNT(DISTINCT raid_date) / ?, 1) AS pct
-            FROM v_attendance WHERE zone_id = ? AND presence = 1{tf}
+            FROM v_attendance WHERE zone_id = ? AND presence = 1{tf}{cut_sql}
             GROUP BY player_name ORDER BY raids DESC, player_name""",
-        (max(total_raids, 1), zone_id, *tp),
+        (max(total_raids, 1), zone_id, *tp, *cut_p),
     )
     return {"total_raids": total_raids, "players": players}
 
@@ -358,6 +399,7 @@ def latest_kills(conn: sqlite3.Connection, limit: int = 10, team: str | None = N
     fk, _, tf, tp = _scope(team)
     zf = " AND fk.zone_id = ?" if zone_id else ""
     zp = (zone_id,) if zone_id else ()
+    cut_sql, cut_p = _before_cutoff(zone_cutoff(conn, zone_id) if zone_id else None, "fk.first_kill_time")
     team_col = "fk.team" if team else (
         "(SELECT p.team FROM v_pulls p WHERE p.encounter_id = fk.encounter_id AND p.difficulty = fk.difficulty "
         "AND p.kill = 1 AND p.start_time = fk.first_kill_time LIMIT 1)"
@@ -366,9 +408,9 @@ def latest_kills(conn: sqlite3.Connection, limit: int = 10, team: str | None = N
         conn,
         f"""SELECT fk.zone_id, fk.zone_name, fk.encounter_name AS boss, fk.encounter_ord, fk.difficulty, fk.first_kill_time,
                    fk.first_kill_date AS date, fk.pulls_to_kill AS pulls, fk.nights_to_kill AS nights, {team_col} AS team
-            FROM {fk} fk WHERE fk.killed = 1 AND fk.difficulty IN (3,4,5){tf.replace('team', 'fk.team')}{zf}
+            FROM {fk} fk WHERE fk.killed = 1 AND fk.difficulty IN (3,4,5){tf.replace('team', 'fk.team')}{zf}{cut_sql}
             ORDER BY fk.first_kill_time DESC LIMIT ?""",
-        (*tp, *zp, limit),
+        (*tp, *zp, *cut_p, limit),
     )
     for r in rows:
         r["difficulty_name"] = DIFFICULTIES.get(r["difficulty"], str(r["difficulty"]))
@@ -523,31 +565,22 @@ def race_timeline(conn: sqlite3.Connection, raid_slug: str, difficulty: int) -> 
 
 # ------------------------------------------------------------------------------------------ peers
 def _our_boss_progress(conn: sqlite3.Connection, raid_slug: str, difficulty: int, team: str | None) -> dict[str, dict[str, Any]]:
-    """Our per-boss progress keyed by Raider.IO boss slug: from our logs when the zone is mapped, else Raider.IO."""
+    """Our per-boss progress keyed by Raider.IO boss slug.
+
+    Taken from ``tier_summary`` when the raid is mapped to one of our zones, so the Peers page uses exactly the same
+    kills, pulls and season cut-off as the Progress page. Falls back to Raider.IO for raids we have no logs for.
+    """
     zone = conn.execute("SELECT id FROM zones WHERE rio_raid_slug = ?", (raid_slug,)).fetchone()
     out: dict[str, dict[str, Any]] = {}
     if zone:
-        fk, _, tf, tp = _scope(team)
-        rows = _rows(
-            conn,
-            f"""SELECT e.rio_encounter_slug AS slug, fk.killed, fk.pulls_to_kill, fk.first_kill_time, fk.first_pull_time
-                FROM encounters e LEFT JOIN {fk} fk ON fk.encounter_id = e.id AND fk.difficulty = ?{tf.replace('team', 'fk.team')}
-                WHERE e.zone_id = ? AND e.rio_encounter_slug IS NOT NULL""",
-            (difficulty, *tp, zone["id"]),
-        )
-        rio = {} if team else {
-            p["encounter_slug"]: p
-            for p in _rows(conn, """SELECT p.encounter_slug, p.is_defeated, p.first_defeated FROM rio_progress p
-                                    JOIN guilds g ON g.id = p.guild_id AND g.is_home = 1
-                                    WHERE p.raid_slug = ? AND p.difficulty = ?""", (raid_slug, difficulty))
-        }
-        for r in rows:
-            rp = rio.get(r["slug"], {})
-            out[r["slug"]] = {
-                "killed": bool(r["killed"]) or bool(rp.get("is_defeated")),
-                "pulls": r["pulls_to_kill"] if r["pulls_to_kill"] else None,
-                "first_kill_ms": r["first_kill_time"] or (rp.get("first_defeated") if rp.get("is_defeated") else None),
-                "started_ms": r["first_pull_time"],
+        for b in tier_summary(conn, zone["id"], difficulty, team)["bosses"]:
+            if not b["rio_encounter_slug"]:
+                continue
+            out[b["rio_encounter_slug"]] = {
+                "killed": bool(b["counts"]),
+                "pulls": (b["pulls_to_kill"] if b["counts"] else b["total_pulls"]) or None,
+                "first_kill_ms": b["kill_ms"] if b["counts"] else None,
+                "started_ms": b["first_pull_time"],
                 "source": "logs",
             }
     if out and any(v["pulls"] for v in out.values()):
@@ -800,6 +833,10 @@ def performance(
     if not include_pugs and realm:
         where.append("(server IS NULL OR LOWER(REPLACE(server, '''', '')) = ?)")
         params.append(realm.lower())
+    cutoff = zone_cutoff(conn, zone_id)
+    if cutoff:
+        where.append("start_time <= ?")
+        params.append(cutoff)
     w = " AND ".join(where)
     rows = _rows(
         conn,

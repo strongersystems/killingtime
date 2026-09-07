@@ -97,13 +97,16 @@ def test_tier_metrics(synced):
     assert s["next_boss"]["name"] == "Entombed Sentinels" and s["next_boss"]["best_pct"] == 38.0
     assert s["nights"] == 2
     tl = metrics.progress_timeline(conn, 44, 5)
-    assert [p["kills"] for p in tl] == [1, 2, 3] and tl[-1]["day"] == 9.0
+    assert [p["kills"] for p in tl] == [1, 2] and tl[-1]["day"] == 2.0  # the post-season kill is not on the timeline
     cmp = metrics.tier_comparison(conn, 5)
     prev = next(c for c in cmp if c["zone_id"] == 44)
-    assert [b["cum_pulls"] for b in prev["bosses"]] == [4, 10, 20]
+    # Dimensius died post-season, so its pulls are not progression and do not add to the cumulative total
+    assert [b["cum_pulls"] for b in prev["bosses"]] == [4, 10, 10]
     assert prev["days_to_latest_kill"] == 2.0  # the post-season kill does not extend the tier
     nights = metrics.raid_nights(conn, 44)
-    assert nights[0]["pull_date"] == "2026-05-14" and nights[0]["kills"] == 2 and nights[0]["wipes"] == 3
+    # nights after the season cut-off (2026-05-10) are not part of the tier
+    assert [n["pull_date"] for n in nights] == ["2026-05-07", "2026-05-05"]
+    assert nights[0]["kills"] == 1 and nights[0]["wipes"] == 5
     att = metrics.attendance_summary(conn, 46)
     assert att["total_raids"] == 3
     assert att["players"][0]["player_name"] == "Tagrik" and att["players"][0]["pct"] == 100.0

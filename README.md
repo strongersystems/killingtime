@@ -83,7 +83,7 @@ guild's Warcraft Logs reports. Such kills are shown as "no log" and have no pull
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 42 tests, no network needed
+pytest -q          # 43 tests, no network needed
 ruff check .
 ```
 
