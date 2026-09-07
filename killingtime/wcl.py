@@ -235,6 +235,24 @@ class WCLClient:
         data = self.query(gql, {"guildID": guild_id, "zoneID": zone_id, "difficulty": difficulty})
         return ((data.get("guildData") or {}).get("guild") or {}).get("zoneRanking") or {}
 
+    def report_rankings(self, code: str, metric: str = "dps") -> list[dict]:
+        """Per-fight player rankings (parses) for a report. Only kills have rankings.
+
+        Each entry: {fightID, encounter {id name}, difficulty, kill, roles: {tanks|healers|dps: {characters: [
+        {name, class, spec, amount, rankPercent, bracketPercent, server {...}}]}}}.
+        """
+        gql = """
+        query Rankings($code: String!, $metric: ReportRankingMetricType!) {
+          reportData { report(code: $code) { rankings(playerMetric: $metric, compare: Parses) } }
+        }"""
+        data = self.query(gql, {"code": code, "metric": metric})
+        rankings = ((data.get("reportData") or {}).get("report") or {}).get("rankings") or {}
+        if isinstance(rankings, str):  # the field is a JSON scalar; some gateways return it serialised
+            import json
+
+            rankings = json.loads(rankings)
+        return rankings.get("data") or []
+
     def guild_attendance(self, guild_id: int, zone_id: int | None = None, page: int = 1, limit: int = 25) -> dict:
         gql = """
         query Attendance($guildID: Int!, $zoneID: Int, $page: Int!, $limit: Int!) {

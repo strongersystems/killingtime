@@ -205,6 +205,13 @@ guild on the realm, plus configured rival guilds).
 - Comparing tiers: use days since the guild's first pull in that tier/difficulty, or cumulative pulls by boss order,
   not calendar dates, so tiers line up.
 - Attendance: presence = 1 means present. Attendance % = raids attended / total raids in that zone.
+- Raid teams: the guild runs separate teams ({', '.join(settings.team_names) or 'none configured'}). v_pulls, v_attendance and
+  v_parses carry a team column (NULL = not attributed); v_team_first_kills / v_team_raid_nights give per-team first kills
+  and nights. When the user names a team, filter on it; otherwise say whether numbers are guild-wide.
+- Parses: v_parses.rank_percent is the Warcraft Logs percentile (0-100, higher is better) per player per kill; dps for
+  tanks/damage dealers, hps for healers. Filter server to the home realm to exclude pugs.
+- "Guilds around our level": pick guilds from v_rio_progress whose kill count is close to ours, then compare num_pulls
+  per boss (median/percentile) and days from each guild's first pull_started_at to first_defeated.
 - When a comparison or trend is the heart of the answer, call render_chart (at most 2 charts per answer).
   Categories are labels; series values must be numbers. Prefer one chart that answers the question over many.
 - Round sensibly (pulls as integers, percentages to 1 decimal, hours to 1 decimal).

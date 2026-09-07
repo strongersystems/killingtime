@@ -4,9 +4,10 @@
 {% set z = summary.zone %}
 <div class="page-head">
   <div>
-    <h1>{{ z.name }} <span class="pill {{ summary.difficulty_name|lower }}">{{ summary.difficulty_name }}</span></h1>
+    <h1>{{ z.name }} <span class="pill {{ summary.difficulty_name|lower }}">{{ summary.difficulty_name }}</span>{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1>
     <small>{{ summary.first_pull_date or '—' }} → {{ summary.last_pull_date or '—' }}
-      {% if z.rio_raid_slug %}· <a href="/rivals?raid={{ z.rio_raid_slug }}&difficulty={{ difficulty }}">realm standings</a>{% endif %}</small>
+      {% if z.rio_raid_slug %}· <a href="{{ link('/peers', raid=z.rio_raid_slug, difficulty=difficulty, team=team) }}">guilds around our level</a>
+      · <a href="/rivals?raid={{ z.rio_raid_slug }}&difficulty={{ difficulty }}">realm standings</a>{% endif %}</small>
   </div>
   <div class="filters">
     <form method="get" action="/">
@@ -14,9 +15,10 @@
         {% for t in overview.tiers %}<option value="{{ t.id }}" {{ 'selected' if t.id == zone_id }}>{{ t.name }} — {{ t.summary }}</option>{% endfor %}
       </select>
       <input type="hidden" name="difficulty" value="{{ difficulty }}">
+      {% if team %}<input type="hidden" name="team" value="{{ team }}">{% endif %}
     </form>
     <span class="seg">
-      {% for d in (5, 4, 3) %}<a href="/?zone={{ zone_id }}&difficulty={{ d }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}
+      {% for d in (5, 4, 3) %}<a href="{{ link('/', zone=zone_id, difficulty=d, team=team) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}
     </span>
   </div>
 </div>
@@ -26,12 +28,15 @@
     <div class="label">Progress</div>
     <div class="value">{{ summary.killed }}<span class="muted">/{{ summary.total_bosses }}</span></div>
     <div class="progress"><span style="width: {{ (100 * summary.killed / summary.total_bosses) if summary.total_bosses else 0 }}%"></span></div>
-    <div class="sub">{% if summary.cleared %}Cleared{% elif summary.next_boss %}Next: {{ summary.next_boss.name }}{% if summary.next_boss.best_pct is not none %} · best {{ summary.next_boss.best_pct|round(1) }}%{% endif %}{% else %}No pulls yet{% endif %}</div>
+    <div class="sub">{% if summary.cleared %}Cleared {{ summary.last_kill_date }}{% elif summary.next_boss %}Next: {{ summary.next_boss.name }}{% if summary.next_boss.best_pct is not none %} · best {{ summary.next_boss.best_pct|round(1) }}%{% endif %}{% else %}No pulls yet{% endif %}</div>
   </div>
   <div class="tile"><div class="label">Pulls</div><div class="value">{{ summary.pulls|num }}</div><div class="sub">{{ summary.kills }} kills · {{ summary.wipes }} wipes</div></div>
   <div class="tile"><div class="label">Raid nights</div><div class="value">{{ summary.nights }}</div><div class="sub">{{ summary.hours }} h in combat</div></div>
   <div class="tile"><div class="label">Days to latest kill</div><div class="value">{{ summary.days_to_latest_kill if summary.days_to_latest_kill is not none else '—' }}</div><div class="sub">since first pull {{ summary.first_pull_date or '' }}</div></div>
   <div class="tile"><div class="label">Avg item level</div><div class="value">{{ summary.avg_ilvl or '—' }}</div><div class="sub">across logged pulls</div></div>
+  {% if perf and perf.parses %}
+  <div class="tile"><div class="label">Median parse</div><div class="value">{{ perf.median|round(0)|int }}<span class="muted">%</span></div><div class="sub"><a href="{{ link('/performance', zone=zone_id, difficulty=difficulty, team=team) }}">{{ perf.parses }} parses on {{ perf.kills }} kills</a></div></div>
+  {% endif %}
   {% for r in overview.raiderio if r.raid_slug == z.rio_raid_slug %}
   <div class="tile"><div class="label">Raider.IO rank</div>
     <div class="value small">{{ r.summary }}</div>
@@ -42,9 +47,33 @@
   {% endfor %}
 </div>
 
+{% if team_cards %}
+<div class="grid two" style="margin-bottom:1rem">
+  {% for tc in team_cards %}
+  <div class="card">
+    <h2><span>{{ tc.team }}</span><span class="tools"><a href="{{ link('/', zone=zone_id, team=tc.team) }}">open team view →</a></span></h2>
+    {% if tc.difficulties %}
+    <table>
+      <thead><tr><th>Difficulty</th><th class="num">Progress</th><th>Status</th><th class="num">Pulls</th><th class="num">Nights</th></tr></thead>
+      <tbody>
+      {% for d in tc.difficulties %}
+      <tr><td><span class="pill {{ d.name|lower }}">{{ d.name }}</span></td><td class="num"><b>{{ d.killed }}/{{ d.total }}</b></td>
+        <td>{% if d.cleared %}Cleared {{ d.last_kill_date }}{% elif d.next_boss %}On {{ d.next_boss }}{% if d.next_best_pct is not none %} · best {{ d.next_best_pct|round(1) }}%{% endif %}{% else %}—{% endif %}</td>
+        <td class="num">{{ d.pulls|num }}</td><td class="num">{{ d.nights }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">No pulls logged for this team in {{ z.name }}.</p>{% endif %}
+    {% if tc.latest_kills %}<p class="muted">Latest: {% for k in tc.latest_kills[:3] %}{{ k.boss }} ({{ k.difficulty_name[0] }} · {{ k.date }}){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="grid two" id="charts"></div>
 
-<div class="card" style="margin-top:1rem">
+<div class="grid two" style="margin-top:1rem">
+<div class="card">
   <h2>Boss by boss</h2>
   <div class="table-scroll">
   <table>
@@ -66,7 +95,17 @@
     </tbody>
   </table>
   </div>
-  <p class="muted">Other difficulties in this tier: {% for d, k in other_diffs.items() %}<a href="/?zone={{ zone_id }}&difficulty={{ d }}">{{ DIFFICULTIES[d] }} {{ k }}/{{ summary.total_bosses }}</a>{{ ' · ' if not loop.last }}{% endfor %}</p>
+  <p class="muted">Other difficulties in this tier: {% for d, k in other_diffs.items() %}<a href="{{ link('/', zone=zone_id, difficulty=d, team=team) }}">{{ DIFFICULTIES[d] }} {{ k }}/{{ summary.total_bosses }}</a>{{ ' · ' if not loop.last }}{% endfor %}</p>
+</div>
+<div class="card">
+  <h2>Latest kills{% if team %} · {{ team }}{% endif %}</h2>
+  {% if latest %}
+  <table>
+    <thead><tr><th>Date</th><th>Boss</th><th>Difficulty</th>{% if not team and teams %}<th>Team</th>{% endif %}<th class="num">Pulls</th></tr></thead>
+    <tbody>{% for k in latest %}<tr><td>{{ k.date }}</td><td>{{ k.boss }}</td><td><span class="pill {{ k.difficulty_name|lower }}">{{ k.difficulty_name }}</span></td>{% if not team and teams %}<td>{{ k.team or '—' }}</td>{% endif %}<td class="num">{{ k.pulls }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted">No kills logged in this tier yet.</p>{% endif %}
+</div>
 </div>
 {% endblock %}
 
@@ -110,6 +149,17 @@
         { name: "Wipes", data: nights.map((n) => n.wipes) },
       ],
       yTitle: "pulls",
+    });
+  }
+
+  // 4. Teams side by side (guild view only): bosses killed per difficulty.
+  if (data.teams && data.teams.length > 1) {
+    const diffs = [5, 4, 3].filter((d) => data.teams.some((t) => t.difficulties.some((x) => x.difficulty === d)));
+    const names = { 5: "Mythic", 4: "Heroic", 3: "Normal" };
+    KT.mount(root, {
+      title: "Teams: bosses killed", type: "bar", labels: diffs.map((d) => names[d]),
+      series: data.teams.map((t) => ({ name: t.team, data: diffs.map((d) => { const x = t.difficulties.find((y) => y.difficulty === d); return x ? x.killed : null; }) })),
+      yTitle: "bosses killed", yMax: s.total_bosses,
     });
   }
 })();

@@ -2,11 +2,12 @@
 {% block title %}Raid nights{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Raid nights</h1><small>One row per date and difficulty, from our Warcraft Logs pulls.</small></div>
+  <div><h1>Raid nights{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1><small>One row per date and difficulty, from our Warcraft Logs pulls.</small></div>
   <form method="get" action="/nights" class="filters">
     <select class="control" name="zone" onchange="this.form.submit()">
       {% for t in overview.tiers %}<option value="{{ t.id }}" {{ 'selected' if t.id == zone_id }}>{{ t.name }}</option>{% endfor %}
     </select>
+    {% if team %}<input type="hidden" name="team" value="{{ team }}">{% endif %}
   </form>
 </div>
 <div class="grid two" id="charts"></div>

@@ -6,10 +6,19 @@
   "observability": { "enabled": true },
   "vars": {
     "PUBLIC_URL": "https://progress.killingtime.fyi",
+    "SITE_HOSTS": "killingtime.fyi,www.killingtime.fyi",
+    "SITE_URL": "https://killingtime.fyi",
     "GUILD_NAME": "Killing Time",
     "GUILD_REALM": "Draenor",
     "GUILD_REGION": "EU",
     "RIVAL_GUILDS": "Internet Diff@draenor/eu; Advance@draenor/eu; Incentive@draenor/eu",
+    "RAID_TEAMS": "CE Team: Nórmán, Canofundeath, Weeklynoleav, Hedstrong, Cruzixl, Miists, Elelena, Findruid; 6 Hour Team: Andrewro, Elfàrcher, Cmlsmall, Noint, Viamisolocky, Billadin, Kijosa, Pawnstaar, Dozakk",
+    "SITE_TAGLINE": "",
+    "SITE_ABOUT": "",
+    "SITE_RAID_TIMES": "",
+    "SITE_RECRUITING": "",
+    "SITE_APPLY_URL": "",
+    "SITE_DISCORD_URL": "",
     "ASK_MODEL": "claude-opus-5",
     "ASK_EFFORT": "high"
   },
@@ -27,5 +36,9 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["KTContainer"] }],
   "triggers": { "crons": ["15 */2 * * *"] },
   "workers_dev": true,
-  "routes": [{ "pattern": "progress.killingtime.fyi", "custom_domain": true }]
+  "routes": [
+    { "pattern": "progress.killingtime.fyi", "custom_domain": true },
+    { "pattern": "killingtime.fyi", "custom_domain": true },
+    { "pattern": "www.killingtime.fyi", "custom_domain": true }
+  ]
 }

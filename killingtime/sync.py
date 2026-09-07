@@ -13,6 +13,7 @@ import logging
 import re
 import sqlite3
 import time
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -34,6 +35,7 @@ class SyncStats:
     reports: int = 0
     fights: int = 0
     attendance_rows: int = 0
+    parses: int = 0
     rio_guilds: int = 0
     rio_progress_rows: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -75,6 +77,11 @@ def match_name(target: str, candidates: dict[str, str], cutoff: float = 0.8) -> 
     for slug, name in candidates.items():
         if slug == t_slug or _norm(name) == t_norm or slug.replace("-", "") == t_norm:
             return slug
+    # One name contained in the other, e.g. WCL "VS / DR / MQD" vs Raider.IO "MN Tier 1 (VS / DR / MQD)".
+    if len(t_norm) >= 4:
+        contained = [slug for slug, name in candidates.items() if t_norm in _norm(name) or _norm(name) in t_norm]
+        if len(contained) == 1:
+            return contained[0]
     best, best_ratio = None, 0.0
     for slug, name in candidates.items():
         ratio = max(
@@ -128,6 +135,26 @@ def upsert_guild(
 
 
 # ------------------------------------------------------------------------------------------ WCL
+RAID_DIFFICULTIES = {3, 4, 5}
+
+
+def is_raid_zone(zone: dict) -> bool:
+    """Warcraft Logs lists dungeon seasons (difficulty 10) and Delves as zones too; raids offer Normal/Heroic/Mythic.
+    Zones without difficulty data are kept (older payloads and test fixtures)."""
+    ids = {int(d["id"]) for d in (zone.get("difficulties") or []) if d.get("id") is not None}
+    return not ids or bool(ids & RAID_DIFFICULTIES)
+
+
+def drop_zone(conn: sqlite3.Connection, zone_id: int) -> None:
+    """Remove a zone and everything synced under it (used when a stored zone turns out not to be a raid)."""
+    conn.execute("DELETE FROM attendance WHERE report_code IN (SELECT code FROM reports WHERE zone_id = ?)", (zone_id,))
+    conn.execute("DELETE FROM fights WHERE report_code IN (SELECT code FROM reports WHERE zone_id = ?)", (zone_id,))
+    conn.execute("DELETE FROM reports WHERE zone_id = ?", (zone_id,))
+    conn.execute("DELETE FROM wcl_zone_rankings WHERE zone_id = ?", (zone_id,))
+    conn.execute("DELETE FROM encounters WHERE zone_id = ?", (zone_id,))
+    conn.execute("DELETE FROM zones WHERE id = ?", (zone_id,))
+
+
 def sync_zones(conn: sqlite3.Connection, wcl: WCLClient, n_expansions: int, stats: SyncStats, progress: Progress) -> None:
     expansions = sorted(wcl.expansions(), key=lambda e: e["id"], reverse=True)[: max(1, n_expansions)]
     with transaction(conn):
@@ -137,8 +164,15 @@ def sync_zones(conn: sqlite3.Connection, wcl: WCLClient, n_expansions: int, stat
                 (exp["id"], exp["name"]),
             )
             zones = wcl.zones(exp["id"])
-            progress(f"expansion {exp['name']}: {len(zones)} zones")
+            raids = [z for z in zones if is_raid_zone(z)]
+            progress(f"expansion {exp['name']}: {len(raids)} raid zones")
             for z in zones:
+                if z in raids:
+                    continue
+                if conn.execute("SELECT 1 FROM zones WHERE id = ?", (z["id"],)).fetchone():
+                    drop_zone(conn, int(z["id"]))
+                    progress(f"dropped non-raid zone {z['name']} (#{z['id']}) and its reports")
+            for z in raids:
                 conn.execute(
                     """INSERT INTO zones(id, name, expansion_id, frozen) VALUES (?, ?, ?, ?)
                        ON CONFLICT(id) DO UPDATE SET name = excluded.name, expansion_id = excluded.expansion_id,
@@ -194,7 +228,8 @@ def sync_reports(
                    VALUES (?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(code) DO UPDATE SET zone_id = excluded.zone_id, title = excluded.title,
                        end_time = excluded.end_time,
-                       fights_synced_at = CASE WHEN excluded.end_time > reports.end_time THEN NULL ELSE reports.fights_synced_at END""",
+                       fights_synced_at = CASE WHEN excluded.end_time > reports.end_time THEN NULL ELSE reports.fights_synced_at END,
+                       rankings_synced_at = CASE WHEN excluded.end_time > reports.end_time THEN NULL ELSE reports.rankings_synced_at END""",
                 (
                     rep["code"],
                     guild_id,
@@ -306,6 +341,100 @@ def sync_attendance(conn: sqlite3.Connection, wcl: WCLClient, wcl_guild_id: int,
                     )
                     stats.attendance_rows += 1
         progress(f"attendance synced for zone {zid}: {len(rows)} reports")
+
+
+def _fold(name: str) -> str:
+    """Case- and accent-insensitive key for player names (Nórmán == norman)."""
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c)).casefold()
+
+
+def assign_teams(conn: sqlite3.Connection, teams: dict[str, list[str]], min_matches: int, progress: Progress) -> dict[str, int]:
+    """Assign every report with attendance to the raid team whose roster shows up most (ties and thin matches stay unassigned)."""
+    conn.execute("DELETE FROM report_teams")
+    if not teams:
+        conn.commit()
+        return {}
+    rosters = {team: {_fold(p) for p in players} for team, players in teams.items()}
+    counts: dict[str, int] = {t: 0 for t in teams}
+    rows = conn.execute("SELECT report_code, player_name FROM attendance").fetchall()
+    present: dict[str, set[str]] = {}
+    for r in rows:
+        present.setdefault(r["report_code"], set()).add(_fold(r["player_name"]))
+    with transaction(conn):
+        for code, names in present.items():
+            scores = sorted(((len(names & roster), team) for team, roster in rosters.items()), reverse=True)
+            best, team = scores[0]
+            if best < min_matches or (len(scores) > 1 and scores[1][0] == best):
+                continue
+            conn.execute("INSERT INTO report_teams(report_code, team, matches) VALUES (?, ?, ?)", (code, team, best))
+            counts[team] += 1
+    progress("raid teams: " + ", ".join(f"{t} {n} reports" for t, n in counts.items()))
+    return counts
+
+
+def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], stats: SyncStats, progress: Progress, limit: int = 120) -> None:
+    """Fetch Warcraft Logs rankings (parses) for kill reports that have none yet, newest first, within a per-run budget."""
+    if not zone_ids:
+        return
+    placeholders = ",".join("?" * len(zone_ids))
+    pending = [
+        r["code"]
+        for r in conn.execute(
+            f"""SELECT r.code FROM reports r
+                WHERE r.zone_id IN ({placeholders}) AND r.rankings_synced_at IS NULL
+                  AND EXISTS (SELECT 1 FROM fights f WHERE f.report_code = r.code AND f.kill = 1 AND f.difficulty IN (3,4,5))
+                ORDER BY r.start_time DESC LIMIT ?""",
+            (*zone_ids, limit),
+        )
+    ]
+    # Reports with no kills never get rankings: mark them done so we don't look again.
+    conn.execute(
+        f"""UPDATE reports SET rankings_synced_at = ? WHERE zone_id IN ({placeholders}) AND rankings_synced_at IS NULL
+            AND fights_synced_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM fights f WHERE f.report_code = reports.code AND f.kill = 1 AND f.difficulty IN (3,4,5))""",
+        (now_ms(), *zone_ids),
+    )
+    conn.commit()
+    if not pending:
+        progress("parses: up to date")
+        return
+    progress(f"fetching parses for {len(pending)} reports")
+    done = 0
+    for code in pending:
+        rows: list[tuple] = []
+        try:
+            for metric, roles in (("dps", ("tanks", "dps")), ("hps", ("healers",))):
+                for fight in wcl.report_rankings(code, metric):
+                    if not fight.get("kill"):
+                        continue
+                    enc = (fight.get("encounter") or {}).get("id")
+                    if not enc:
+                        continue
+                    for role in roles:
+                        for ch in ((fight.get("roles") or {}).get(role) or {}).get("characters") or []:
+                            rows.append(
+                                (code, int(fight["fightID"]), int(enc), fight.get("difficulty"), ch.get("name"),
+                                 (ch.get("server") or {}).get("name"), ch.get("class"), ch.get("spec"), role, metric,
+                                 ch.get("amount"), ch.get("rankPercent"), ch.get("bracketPercent"))
+                            )
+        except WCLError as exc:
+            stats.warn(f"parses unavailable for report {code}: {exc}", progress)
+            if "rate limit" in str(exc).lower():
+                break
+            continue
+        with transaction(conn):
+            conn.execute("DELETE FROM parses WHERE report_code = ?", (code,))
+            conn.executemany(
+                """INSERT OR REPLACE INTO parses(report_code, fight_id, encounter_id, difficulty, player_name, server, player_class, spec,
+                       role, metric, amount, rank_percent, bracket_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [r for r in rows if r[4]],
+            )
+            conn.execute("UPDATE reports SET rankings_synced_at = ? WHERE code = ?", (now_ms(), code))
+        stats.parses += len(rows)
+        done += 1
+        if done % 20 == 0:
+            progress(f"  parses: {done}/{len(pending)} reports")
+    progress(f"parses synced for {done} reports ({stats.parses} rows)")
 
 
 # ------------------------------------------------------------------------------------ Raider.IO
@@ -527,13 +656,17 @@ def run_sync(
             active_zones = [
                 r["zone_id"]
                 for r in conn.execute(
-                    "SELECT DISTINCT zone_id FROM reports WHERE guild_id = ? ORDER BY zone_id DESC LIMIT 4", (gid,)
+                    "SELECT DISTINCT zone_id FROM reports WHERE guild_id = ? ORDER BY zone_id DESC LIMIT 8", (gid,)
                 )
             ]
-            rank_zones = sorted(set(active_zones) | set(touched))[-4:]
+            rank_zones = sorted(set(active_zones[:4]) | set(touched))[-4:]
             sync_zone_rankings(conn, wcl, gid, wcl_gid, rank_zones, stats, progress)
             if not skip_attendance:
-                sync_attendance(conn, wcl, wcl_gid, active_zones[:3], stats, progress)
+                # Attendance drives the raid-team split, so cover every tier we have logs for (newest first).
+                sync_attendance(conn, wcl, wcl_gid, active_zones, stats, progress)
+            assign_teams(conn, settings.teams, settings.raid_team_min_matches, progress)
+            if settings.sync_parses_per_run > 0:
+                sync_parses(conn, wcl, active_zones[:4], stats, progress, limit=settings.sync_parses_per_run)
             stats.wcl_queries = wcl.queries_made
             try:
                 rl = wcl.rate_limit()
@@ -552,10 +685,18 @@ def run_sync(
             stats.rio_requests = rio.requests_made
         set_meta(conn, "last_sync", str(now_ms()))
         conn.commit()
-        from .state import configured, persist
+        from .state import configured, persist, publish_page
 
         if configured(settings):
             progress("snapshot uploaded" if persist(settings) else "warning: snapshot upload failed")
+            try:
+                from .public import render_public_page
+
+                html = render_public_page(conn, settings)
+            except Exception as exc:  # noqa: BLE001 - the public page must never fail the sync
+                stats.warn(f"public site render failed: {exc}", progress)
+            else:
+                progress("public site published" if publish_page(settings, html) else "warning: public site publish failed")
     except Exception as exc:  # noqa: BLE001 - we want the log row to capture any failure
         status = "error"
         stats.warn(f"sync failed: {exc}", progress)

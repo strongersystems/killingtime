@@ -7,9 +7,19 @@ A progress and reporting app for the guild **Killing Time** (Draenor, EU). It pu
   progression timeline, pulls per boss, recent nights.
 - **Tiers** – tier-over-tier comparison aligned by boss order and by days since first pull (cumulative pulls,
   days to each kill, pulls per boss, nights per tier).
+- **Raid teams** – reports are attributed to your raid teams (`RAID_TEAMS`, e.g. a CE team and a 6-hour team) from
+  attendance, and every page has a Guild / team switcher so each team sees its own progress, pulls and nights.
+- **Peers** – "guilds around our level" for this and last tier: our pulls per boss vs the average, median and
+  quartiles of guilds at a similar kill count (not the top of the server), the percentile of peers we out-pulled,
+  and our days-into-tier at each kill vs the typical pace.
 - **Rivals & Realm** – head-to-head with configured rival guilds and the realm leaderboard: first-kill dates,
   pull counts, best percentages, a "progress race" chart, world/region/realm ranks.
+- **Performance** – Warcraft Logs parses on our kills: average/median/best percentile per player, per boss and per
+  raid night, filterable by team and difficulty, with other-realm pugs hidden by default.
 - **Raid nights** and **Attendance** – per-night kills/wipes/hours and attendance % per raider.
+- **Public site** – a self-contained landing page (`/public`, served at `killingtime.fyi` on Cloudflare) with links
+  to apply / Discord / Raider.IO / Warcraft Logs and the latest progress, per-team standings and recent kills.
+  It is re-rendered and published after every sync.
 - **Ask ✦** – type a question in plain English ("how many pulls did the last boss take compared to last tier?")
   and Claude answers from the database with tables and charts. Read-only by construction.
 - A `kt` command line for syncing, checking configuration, printing text reports and asking questions.
@@ -57,7 +67,7 @@ Hosting it for the whole guild: [docs/DEPLOY.md](docs/DEPLOY.md). How it fits to
 
 | Source | Auth | Data |
 |---|---|---|
-| Warcraft Logs v2 API | client credentials | Every boss pull in your guild's reports: kill/wipe, %, duration, difficulty, item level; attendance; guild zone rankings |
+| Warcraft Logs v2 API | client credentials | Every boss pull in your guild's reports: kill/wipe, %, duration, difficulty, item level; attendance; guild zone rankings; per-player parses on kills |
 | Raider.IO API | none | Per-boss first kills, pull counts and best % for **every guild on the realm** and configured rivals; world/region/realm ranks; raid/boss reference data |
 
 Cross-guild comparisons come from Raider.IO on purpose: rivals don't need to publish their logs, and you don't

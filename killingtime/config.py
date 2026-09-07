@@ -28,6 +28,23 @@ def slugify_realm(realm: str) -> str:
     return realm.strip().lower().replace("'", "").replace(" ", "-")
 
 
+def parse_raid_teams(raw: str) -> dict[str, list[str]]:
+    """Parse ``Team A: Player, Other; Team B: Someone`` into {team: [players]} (order preserved)."""
+    out: dict[str, list[str]] = {}
+    for chunk in raw.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if ":" not in chunk:
+            raise ValueError(f"Bad RAID_TEAMS entry {chunk!r}; expected 'Team name: Player, Player'")
+        name, players = chunk.split(":", 1)
+        roster = [p.strip() for p in players.split(",") if p.strip()]
+        if not name.strip() or not roster:
+            raise ValueError(f"Bad RAID_TEAMS entry {chunk!r}; expected 'Team name: Player, Player'")
+        out[name.strip()] = roster
+    return out
+
+
 def parse_rival_guilds(raw: str) -> list[GuildRef]:
     """Parse ``Name@realm/region; Other Name@realm/region`` into GuildRefs."""
     out: list[GuildRef] = []
@@ -65,6 +82,12 @@ class Settings(BaseSettings):
     rival_guilds: str = ""
     sync_expansions: int = 2
     tier_map: str = ""  # JSON {"wcl_zone_id": "rio_raid_slug"}
+    # Raid teams: "CE Team: Nórmán, Elelena; 6 Hour Team: Andrewro, Billadin". Reports are assigned to the team
+    # with the most roster members in attendance; a report needs at least RAID_TEAM_MIN_MATCHES matches.
+    raid_teams: str = ""
+    raid_team_min_matches: int = 2
+    # Parses: how many reports' rankings to fetch per sync (keeps the WCL points budget in check).
+    sync_parses_per_run: int = 120
 
     # Ask (Claude)
     anthropic_api_key: str = ""
@@ -83,6 +106,15 @@ class Settings(BaseSettings):
     kt_state_secret: str = ""
     kt_auto_sync: bool = False
 
+    # Public guild site (rendered after every sync, served at /public and pushed to the Worker).
+    site_url: str = ""  # e.g. https://killingtime.fyi (only used for links / canonical URL)
+    site_tagline: str = ""
+    site_about: str = ""
+    site_raid_times: str = ""
+    site_recruiting: str = ""  # e.g. "Recruiting: 1 healer, ranged DPS"
+    site_apply_url: str = ""
+    site_discord_url: str = ""
+
     @field_validator("ask_effort")
     @classmethod
     def _effort(cls, v: str) -> str:
@@ -98,6 +130,14 @@ class Settings(BaseSettings):
     @property
     def rivals(self) -> list[GuildRef]:
         return parse_rival_guilds(self.rival_guilds)
+
+    @property
+    def teams(self) -> dict[str, list[str]]:
+        return parse_raid_teams(self.raid_teams)
+
+    @property
+    def team_names(self) -> list[str]:
+        return list(self.teams)
 
     @property
     def tier_map_dict(self) -> dict[int, str]:

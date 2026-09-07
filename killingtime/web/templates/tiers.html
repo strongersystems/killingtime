@@ -2,9 +2,9 @@
 {% block title %}Tier comparison{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Tier over tier <span class="pill {{ DIFFICULTIES[difficulty]|lower }}">{{ DIFFICULTIES[difficulty] }}</span></h1>
+  <div><h1>Tier over tier <span class="pill {{ DIFFICULTIES[difficulty]|lower }}">{{ DIFFICULTIES[difficulty] }}</span>{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1>
   <small>How this tier's progression compares with earlier tiers, aligned by boss order and by days since our first pull.</small></div>
-  <span class="seg">{% for d in (5, 4, 3) %}<a href="/tiers?difficulty={{ d }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
+  <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link('/tiers', difficulty=d, team=team) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
 </div>
 
 {% if not comparison %}
@@ -17,7 +17,7 @@
     <thead><tr><th>Tier</th><th>Expansion</th><th>First pull</th><th class="num">Bosses</th><th class="num">Pulls</th><th class="num">Nights</th><th class="num">Hours</th><th class="num">Days to latest kill</th><th class="num">Pulls / boss killed</th></tr></thead>
     <tbody>
     {% for t in comparison %}
-    <tr><td><a href="/?zone={{ t.zone_id }}&difficulty={{ difficulty }}">{{ t.zone }}</a></td><td>{{ t.expansion or '' }}</td><td>{{ t.first_pull_date }}</td>
+    <tr><td><a href="{{ link('/', zone=t.zone_id, difficulty=difficulty, team=team) }}">{{ t.zone }}</a></td><td>{{ t.expansion or '' }}</td><td>{{ t.first_pull_date }}</td>
       <td class="num">{{ t.killed }}/{{ t.total_bosses }}</td><td class="num">{{ t.pulls|num }}</td><td class="num">{{ t.nights }}</td><td class="num">{{ t.hours }}</td>
       <td class="num">{{ t.days_to_latest_kill if t.days_to_latest_kill is not none else '—' }}</td>
       <td class="num">{{ (t.pulls / t.killed)|round(1) if t.killed else '—' }}</td></tr>

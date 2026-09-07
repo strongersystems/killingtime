@@ -10,28 +10,38 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/">
+    <a class="brand" href="{{ link('/', team=team) }}">
       <span>⚔ {{ settings.guild_name }}</span>
       <span class="faction">{{ (overview.guild.faction if overview.guild and overview.guild.faction else '') }} · {{ settings.guild_realm }} {{ settings.guild_region|upper }}</span>
     </a>
     <nav class="nav">
       {% set path = request.url.path %}
-      <a href="/" class="{{ 'active' if path == '/' }}">Dashboard</a>
-      <a href="/tiers" class="{{ 'active' if path.startswith('/tiers') }}">Tiers</a>
+      <a href="{{ link('/', team=team) }}" class="{{ 'active' if path == '/' }}">Dashboard</a>
+      <a href="{{ link('/tiers', team=team) }}" class="{{ 'active' if path.startswith('/tiers') }}">Tiers</a>
+      <a href="{{ link('/peers', team=team) }}" class="{{ 'active' if path.startswith('/peers') }}">Peers</a>
       <a href="/rivals" class="{{ 'active' if path.startswith('/rivals') }}">Rivals &amp; Realm</a>
-      <a href="/nights" class="{{ 'active' if path.startswith('/nights') }}">Raid nights</a>
-      <a href="/attendance" class="{{ 'active' if path.startswith('/attendance') }}">Attendance</a>
+      <a href="{{ link('/performance', team=team) }}" class="{{ 'active' if path.startswith('/performance') }}">Performance</a>
+      <a href="{{ link('/nights', team=team) }}" class="{{ 'active' if path.startswith('/nights') }}">Raid nights</a>
+      <a href="{{ link('/attendance', team=team) }}" class="{{ 'active' if path.startswith('/attendance') }}">Attendance</a>
       <a href="/ask" class="{{ 'active' if path.startswith('/ask') }}">Ask ✦</a>
       <a href="/status" class="{{ 'active' if path.startswith('/status') }}">Status</a>
     </nav>
     <span class="spacer"></span>
+    {% if teams %}
+    <span class="seg team-seg" title="Raid team">
+      {% set qp = request.query_params %}
+      {% set base = {} %}{% for k, v in qp.items() if k != 'team' %}{% set _ = base.update({k: v}) %}{% endfor %}
+      <a href="{{ link(path, **base) }}" class="{{ 'active' if not team }}">Guild</a>
+      {% for t in teams %}<a href="{{ link(path, **dict(base, team=t)) }}" class="{{ 'active' if t == team }}">{{ t }}</a>{% endfor %}
+    </span>
+    {% endif %}
     <span class="sync">{% if sync_running %}<span class="spinner"></span>syncing…{% elif overview.last_sync %}synced {{ overview.last_sync }}{% else %}never synced{% endif %}</span>
     <button id="theme-btn" class="theme-btn" type="button" title="Toggle theme">◐ Auto</button>
   </header>
   <main>
     {% block content %}{% endblock %}
   </main>
-  <footer>killingtime v{{ version }} · data from <a href="https://www.warcraftlogs.com">Warcraft Logs</a> and <a href="https://raider.io">Raider.IO</a></footer>
+  <footer>killingtime v{{ version }} · data from <a href="https://www.warcraftlogs.com">Warcraft Logs</a> and <a href="https://raider.io">Raider.IO</a> · <a href="/public">public site preview</a></footer>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -2,11 +2,12 @@
 {% block title %}Attendance{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Attendance</h1><small>From Warcraft Logs guild attendance. {{ data.total_raids }} logged raids in this tier.</small></div>
+  <div><h1>Attendance{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1><small>From Warcraft Logs guild attendance. {{ data.total_raids }} logged raids in this tier.</small></div>
   <form method="get" action="/attendance" class="filters">
     <select class="control" name="zone" onchange="this.form.submit()">
       {% for t in overview.tiers %}<option value="{{ t.id }}" {{ 'selected' if t.id == zone_id }}>{{ t.name }}</option>{% endfor %}
     </select>
+    {% if team %}<input type="hidden" name="team" value="{{ team }}">{% endif %}
   </form>
 </div>
 {% if not data.players %}

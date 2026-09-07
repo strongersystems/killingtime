@@ -72,6 +72,12 @@ Other knobs (all optional, defaults are fine):
 | `SYNC_EXPANSIONS` | `2` | How many recent expansions of raid zones to load (2 = current + previous, enough for tier comparisons) |
 | `RIO_REALM_SCAN_PAGES` | `2` | Pages (100 guilds each) of the realm leaderboard to store per raid & difficulty |
 | `TIER_MAP` | – | Manual Warcraft Logs zone → Raider.IO raid mapping if automatic name matching misses one, e.g. `{"46": "the-venomous-abyss"}`. The **Status** page shows what is mapped. |
+| `RAID_TEAMS` | – | Your raid teams and a few roster names each, e.g. `CE Team: Nórmán, Elelena; 6 Hour Team: Andrewro, Billadin`. Each report is attributed to the team with the most roster members in its attendance (accents and case are ignored). Names need not be complete: 6–10 regulars per team is plenty. |
+| `RAID_TEAM_MIN_MATCHES` | `2` | Minimum roster matches for a report to be attributed to a team; ties stay unattributed (guild-only view). |
+| `SYNC_PARSES_PER_RUN` | `120` | Kill reports whose Warcraft Logs parses are fetched per sync (2 API queries each). `0` disables parses. |
+| `SITE_APPLY_URL`, `SITE_DISCORD_URL` | – | Links shown on the public site (Apply / Discord buttons). |
+| `SITE_TAGLINE`, `SITE_ABOUT`, `SITE_RAID_TIMES`, `SITE_RECRUITING` | – | Text for the public site: hero line, "Join us" paragraph, raid schedule, recruiting banner. |
+| `SITE_URL` | – | Canonical URL of the public site (e.g. `https://killingtime.fyi`). |
 | `KT_DB_PATH` | `data/killingtime.db` | Where the SQLite database lives |
 | `KT_HOST`, `KT_PORT` | `127.0.0.1`, `8000` | Web server bind address |
 

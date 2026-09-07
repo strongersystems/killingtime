@@ -17,13 +17,14 @@
     <h2>Live sync log</h2>
     <div class="log" id="livelog">{{ sync.log|join('\n') if sync.log else (sync.last_result or 'Idle.') }}</div>
     <p class="muted">Configuration: Warcraft Logs {% if settings.wcl_configured %}✓{% else %}✗ not configured{% endif %} · Raider.IO ✓ (public) · Ask {% if ask_enabled %}✓{% else %}✗{% endif %} · rivals: {{ settings.rival_guilds or 'none' }}</p>
+    <p class="muted">Raid teams: {% if team_counts %}{% for t in team_counts %}{{ t.team }} {{ t.reports }} reports{{ ' · ' if not loop.last }}{% endfor %} · {{ unassigned }} unassigned{% else %}none configured (set <code>RAID_TEAMS</code>){% endif %}</p>
   </div>
   <div class="card">
     <h2>Zone ↔ Raider.IO mapping</h2>
     <div class="table-scroll">
     <table>
-      <thead><tr><th>WCL zone</th><th>Expansion</th><th class="num">Reports</th><th>Raider.IO raid</th><th class="num">Bosses mapped</th></tr></thead>
-      <tbody>{% for z in zones %}<tr><td>{{ z.name }} <small class="muted">#{{ z.id }}</small></td><td>{{ z.expansion or '' }}</td><td class="num">{{ z.reports }}</td>
+      <thead><tr><th>WCL zone</th><th>Expansion</th><th class="num">Reports</th><th class="num">Parsed</th><th>Raider.IO raid</th><th class="num">Bosses mapped</th></tr></thead>
+      <tbody>{% for z in zones %}<tr><td>{{ z.name }} <small class="muted">#{{ z.id }}</small></td><td>{{ z.expansion or '' }}</td><td class="num">{{ z.reports }}</td><td class="num">{{ z.parsed_reports }}</td>
         <td>{{ z.rio_raid_slug or '<span class="muted">—</span>'|safe }}</td><td class="num">{{ z.mapped_bosses }}/{{ z.bosses }}</td></tr>{% endfor %}</tbody>
     </table>
     </div>

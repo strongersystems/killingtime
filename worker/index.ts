@@ -1,8 +1,12 @@
 /**
  * Cloudflare Worker that fronts the Killing Time container.
  *
- *  - Proxies every request to a single container instance ("main") running the FastAPI app on port 8000.
- *  - Optional shared password (SITE_PASSWORD secret) on the pages that cost money or trigger work.
+ *  - progress.killingtime.fyi (PUBLIC_URL): proxies every request to a single container instance ("main") running
+ *    the FastAPI app on port 8000, with an optional shared password (SITE_PASSWORD) on the pages that cost money or
+ *    trigger work.
+ *  - killingtime.fyi / www (SITE_HOSTS): the public guild site. The container renders it after every sync and PUTs
+ *    the HTML to /_internal/public; the Worker serves that copy from Durable Object storage, so visitors never wake
+ *    the container. If nothing has been published yet the request falls through to the container's /public page.
  *  - /_internal/db: the container uploads/downloads a gzipped SQLite snapshot here; it is stored in the
  *    Durable Object's own SQLite storage in 1 MB chunks, so the data survives container restarts.
  *  - Cron trigger: wakes the container and starts an incremental sync.
@@ -12,6 +16,15 @@ import { Container, getContainer } from "@cloudflare/containers";
 export interface Env {
   KT_CONTAINER: DurableObjectNamespace<KTContainer>;
   PUBLIC_URL: string;
+  SITE_HOSTS?: string;
+  SITE_URL?: string;
+  SITE_TAGLINE?: string;
+  SITE_ABOUT?: string;
+  SITE_RAID_TIMES?: string;
+  SITE_RECRUITING?: string;
+  SITE_APPLY_URL?: string;
+  SITE_DISCORD_URL?: string;
+  RAID_TEAMS?: string;
   SITE_PASSWORD?: string;
   KT_STATE_SECRET: string;
   WCL_CLIENT_ID?: string;
@@ -28,6 +41,7 @@ export interface Env {
 
 const CHUNK = 1024 * 1024;
 const PROTECTED = ["/ask", "/api/ask", "/sync", "/api/sync", "/status"];
+const SECRET_HEADER = "X-KT-Secret";
 
 export class KTContainer extends Container<Env> {
   defaultPort = 8000;
@@ -49,13 +63,22 @@ export class KTContainer extends Container<Env> {
       GUILD_REALM: env.GUILD_REALM ?? "Draenor",
       GUILD_REGION: env.GUILD_REGION ?? "EU",
       RIVAL_GUILDS: env.RIVAL_GUILDS ?? "",
+      RAID_TEAMS: env.RAID_TEAMS ?? "",
       TIER_MAP: env.TIER_MAP ?? "",
       ASK_MODEL: env.ASK_MODEL ?? "claude-opus-5",
       ASK_EFFORT: env.ASK_EFFORT ?? "high",
+      SITE_URL: env.SITE_URL ?? "",
+      SITE_TAGLINE: env.SITE_TAGLINE ?? "",
+      SITE_ABOUT: env.SITE_ABOUT ?? "",
+      SITE_RAID_TIMES: env.SITE_RAID_TIMES ?? "",
+      SITE_RECRUITING: env.SITE_RECRUITING ?? "",
+      SITE_APPLY_URL: env.SITE_APPLY_URL ?? "",
+      SITE_DISCORD_URL: env.SITE_DISCORD_URL ?? "",
     };
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS snapshot (idx INTEGER PRIMARY KEY, data BLOB NOT NULL); " +
-        "CREATE TABLE IF NOT EXISTS snapshot_meta (key TEXT PRIMARY KEY, value TEXT)",
+        "CREATE TABLE IF NOT EXISTS snapshot_meta (key TEXT PRIMARY KEY, value TEXT); " +
+        "CREATE TABLE IF NOT EXISTS pages (name TEXT PRIMARY KEY, html TEXT NOT NULL, saved_at TEXT NOT NULL)",
     );
   }
 
@@ -64,11 +87,36 @@ export class KTContainer extends Container<Env> {
     if (url.pathname === "/_internal/db") {
       return this.handleSnapshot(request);
     }
+    if (url.pathname === "/_internal/public") {
+      return this.handlePage(request, "public");
+    }
     return super.fetch(request);
   }
 
+  /** Stored copy of the public site. Handled here (before super.fetch) so reads never start the container. */
+  private async handlePage(request: Request, name: string): Promise<Response> {
+    if (request.headers.get(SECRET_HEADER) !== this.env.KT_STATE_SECRET) {
+      return new Response("forbidden", { status: 403 });
+    }
+    const sql = this.ctx.storage.sql;
+    if (request.method === "GET") {
+      const row = [...sql.exec<{ html: string; saved_at: string }>("SELECT html, saved_at FROM pages WHERE name = ?", name)][0];
+      if (!row) return new Response("no page", { status: 404 });
+      return new Response(row.html, {
+        headers: { "Content-Type": "text/html; charset=utf-8", "X-Saved-At": row.saved_at },
+      });
+    }
+    if (request.method === "PUT") {
+      const html = await request.text();
+      if (html.length < 256 || !/<html/i.test(html)) return new Response("not an html page", { status: 400 });
+      sql.exec("INSERT OR REPLACE INTO pages (name, html, saved_at) VALUES (?, ?, ?)", name, html, new Date().toISOString());
+      return new Response(JSON.stringify({ ok: true, bytes: html.length }), { headers: { "Content-Type": "application/json" } });
+    }
+    return new Response("method not allowed", { status: 405 });
+  }
+
   private async handleSnapshot(request: Request): Promise<Response> {
-    if (request.headers.get("X-KT-Secret") !== this.env.KT_STATE_SECRET) {
+    if (request.headers.get(SECRET_HEADER) !== this.env.KT_STATE_SECRET) {
       return new Response("forbidden", { status: 403 });
     }
     const sql = this.ctx.storage.sql;
@@ -129,9 +177,52 @@ function passwordOk(request: Request, env: Env): boolean {
   }
 }
 
+function siteHosts(env: Env): string[] {
+  return (env.SITE_HOSTS ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** The public guild site: serve the published page from storage; fall back to the live container render. */
+async function servePublicSite(request: Request, env: Env, url: URL): Promise<Response> {
+  const container = getContainer(env.KT_CONTAINER, "main");
+  const hosts = siteHosts(env);
+  const apex = hosts[0];
+  if (url.hostname !== apex && url.hostname.startsWith("www.")) {
+    return Response.redirect(`https://${apex}${url.pathname}${url.search}`, 301);
+  }
+  if (url.pathname === "/progress" || url.pathname.startsWith("/progress/")) {
+    return Response.redirect(env.PUBLIC_URL + url.pathname.slice("/progress".length) + url.search, 302);
+  }
+  if (url.pathname === "/_healthz") return new Response("ok");
+  if (url.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain" } });
+  if (url.pathname !== "/" && url.pathname !== "/index.html") {
+    return Response.redirect(`https://${apex}/`, 302);
+  }
+  const stored = await container.fetch(
+    new Request(`${env.PUBLIC_URL}/_internal/public`, { headers: { [SECRET_HEADER]: env.KT_STATE_SECRET } }),
+  );
+  if (stored.ok) {
+    return new Response(stored.body, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=300",
+        "Last-Modified": new Date(stored.headers.get("X-Saved-At") || Date.now()).toUTCString(),
+      },
+    });
+  }
+  // Nothing published yet (first deploy): render live from the container.
+  const live = await container.fetch(new Request(`${env.PUBLIC_URL}/public`, { headers: request.headers }));
+  return new Response(live.body, { status: live.status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (siteHosts(env).includes(url.hostname.toLowerCase())) {
+      return servePublicSite(request, env, url);
+    }
     if (url.pathname === "/_healthz") return new Response("ok");
     if (PROTECTED.some((p) => url.pathname === p || url.pathname.startsWith(p + "/")) && !passwordOk(request, env)) {
       return unauthorized();

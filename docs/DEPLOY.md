@@ -7,6 +7,12 @@ proxies to one container running the FastAPI app, keeps the SQLite database aliv
 storing a gzipped snapshot in its Durable Object storage (`/_internal/db`), protects `/ask`, `/status` and the sync
 endpoints with a shared password, and runs an incremental sync on a cron every two hours.
 
+It also serves the **public guild site** at `killingtime.fyi` (and `www`, which redirects): after every sync the
+container renders `/public` and PUTs the HTML to `/_internal/public`; the Worker stores it next to the snapshot and
+serves it from there, so visitors never wake the container and the page always reflects the latest sync. Hosts are
+listed in `SITE_HOSTS`; the Apply/Discord links and the text on the page come from the `SITE_*` vars in
+`wrangler.jsonc` (see docs/SETUP.md). Raid teams for the team switcher are configured in `RAID_TEAMS` there too.
+
 **Requirements**
 
 - Workers **Paid** plan on the account (Containers are not available on the Free plan).
@@ -26,9 +32,10 @@ npx wrangler secret put WCL_CLIENT_SECRET
 npx wrangler deploy                          # builds the image, pushes it, creates the container app
 ```
 
-The deploy also attaches the custom domain `progress.killingtime.fyi` (the `routes` entry in `wrangler.jsonc`;
-the zone must be on the same account and the token needs the DNS permissions above). To use a different hostname,
-change both the `routes` pattern and `PUBLIC_URL` - the container uses `PUBLIC_URL` to reach the snapshot endpoint.
+The deploy also attaches the custom domains `progress.killingtime.fyi`, `killingtime.fyi` and `www.killingtime.fyi`
+(the `routes` entries in `wrangler.jsonc`; the zone must be on the same account and the token needs the DNS
+permissions above). To use different hostnames, change the `routes` patterns together with `PUBLIC_URL` (the
+container uses it to reach the snapshot endpoint), `SITE_HOSTS` and `SITE_URL`.
 
 On first boot the container auto-syncs (Raider.IO immediately; Warcraft Logs once the WCL secrets exist), uploads a
 snapshot, and the cron keeps it fresh. Rough cost: the `basic` instance only runs while requests or the cron keep it

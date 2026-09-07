@@ -31,8 +31,11 @@ def test_sync_populates_tables(synced):
     assert conn.execute("SELECT COUNT(*) FROM fights").fetchone()[0] == 4 + 6 + 6 + 5 + 4 + 4 + 3
     home = metrics.home_guild(conn)
     assert home["wcl_id"] == 637454 and home["faction"] == "horde" and home["is_home"] == 1
-    # attendance for the current tier only
-    assert conn.execute("SELECT COUNT(*) FROM attendance").fetchone()[0] == 6
+    # attendance rows (fixture only has attendance for the current tier)
+    assert conn.execute("SELECT COUNT(*) FROM attendance").fetchone()[0] == 8
+    # the Mythic+ season zone (47) and its report were skipped
+    assert conn.execute("SELECT COUNT(*) FROM zones WHERE id = 47").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM reports WHERE code = 'DUN2'").fetchone()[0] == 0
     # zone rankings: frozen zone raised a WCLError and was skipped, current zone stored
     ranks = conn.execute("SELECT metric, world_rank FROM wcl_zone_rankings WHERE zone_id = 46 ORDER BY metric").fetchall()
     assert [(r["metric"], r["world_rank"]) for r in ranks] == [("completeRaidSpeed", 1200), ("progress", 890)]

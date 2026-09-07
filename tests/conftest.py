@@ -29,6 +29,9 @@ ZONES = [
      "encounters": [{"id": 3129, "name": "Plexus Sentinel"}, {"id": 3131, "name": "Loom'ithar"}, {"id": 3133, "name": "Dimensius"}]},
     {"id": 46, "name": "The Venomous Abyss", "frozen": False, "expansion": {"id": 7},
      "encounters": [{"id": 3201, "name": "Nek'zali the Soulcoiler"}, {"id": 3202, "name": "Entombed Sentinels"}, {"id": 3203, "name": "Ulatek"}]},
+    # A Mythic+ season: Warcraft Logs lists it as a zone, but it is not a raid and must be skipped (with its reports).
+    {"id": 47, "name": "Mythic+ Season 1", "frozen": False, "expansion": {"id": 7}, "difficulties": [{"id": 10, "name": "Dungeon", "sizes": [5]}],
+     "encounters": [{"id": 12000, "name": "Ara-Kara"}, {"id": 12001, "name": "The Dawnbreaker"}]},
 ]
 EXPANSIONS = [{"id": 7, "name": "Midnight"}, {"id": 6, "name": "The War Within"}]
 
@@ -66,14 +69,45 @@ CUR = [
 ]
 REPORTS = {r["code"]: r for r, _ in PREV + CUR}
 FIGHTS = {r["code"]: f for r, f in PREV + CUR}
+# Rosters (see the settings fixture): CE Team = Tagrik, Elelena; 6 Hour Team = Bubonic, Sixer.
+# C1 (heroic clear) is the 6 Hour Team's raid, C2/C3 (mythic) are the CE Team's.
 ATTENDANCE = {
     46: [{"code": "C1", "startTime": ms("2026-08-23"), "zone": {"id": 46},
-          "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Bubonic", "type": "DeathKnight", "presence": 1}]},
+          "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Bubonic", "type": "DeathKnight", "presence": 1},
+                      {"name": "Sixer", "type": "Priest", "presence": 1}]},
          {"code": "C2", "startTime": ms("2026-08-30"), "zone": {"id": 46},
           "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Elelena", "type": "Mage", "presence": 1}]},
          {"code": "C3", "startTime": ms("2026-09-02"), "zone": {"id": 46},
-          "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Bubonic", "type": "DeathKnight", "presence": 2}]}],
+          "players": [{"name": "Tagrik", "type": "Warrior", "presence": 1}, {"name": "Elelena", "type": "Mage", "presence": 1},
+                      {"name": "Bubonic", "type": "DeathKnight", "presence": 2}]}],
 }
+
+
+def fake_rankings(code: str, metric: str) -> list[dict]:
+    """Parses for every kill fight in a report: two guild members and a pug per role bucket."""
+    out = []
+    for f in FIGHTS.get(code, []):
+        if not f.get("kill") or not f.get("encounterID"):
+            continue
+        srv = lambda n: {"id": 1, "name": n, "region": "EU"}  # noqa: E731
+        if metric == "dps":
+            roles = {
+                "tanks": {"characters": [{"name": "Bubonic", "server": srv("Draenor"), "class": "DeathKnight", "spec": "Blood", "amount": 90000.0, "rankPercent": 50, "bracketPercent": 55}]},
+                "healers": {"characters": [{"name": "Sixer", "server": srv("Draenor"), "class": "Priest", "spec": "Holy", "amount": 1000.0, "rankPercent": 1, "bracketPercent": 1}]},
+                "dps": {"characters": [
+                    {"name": "Tagrik", "server": srv("Draenor"), "class": "Warrior", "spec": "Arms", "amount": 180000.0, "rankPercent": 80, "bracketPercent": 85},
+                    {"name": "Elelena", "server": srv("Draenor"), "class": "Mage", "spec": "Frost", "amount": 170000.0, "rankPercent": 60, "bracketPercent": 62},
+                    {"name": "Puggy", "server": srv("Silvermoon"), "class": "Hunter", "spec": "Marksmanship", "amount": 200000.0, "rankPercent": 95, "bracketPercent": 96},
+                ]},
+            }
+        else:
+            roles = {
+                "tanks": {"characters": []},
+                "healers": {"characters": [{"name": "Sixer", "server": srv("Draenor"), "class": "Priest", "spec": "Holy", "amount": 150000.0, "rankPercent": 70, "bracketPercent": 72}]},
+                "dps": {"characters": []},
+            }
+        out.append({"fightID": f["id"], "encounter": {"id": f["encounterID"], "name": "x"}, "difficulty": f["difficulty"], "kill": True, "roles": roles})
+    return out
 
 
 class FakeWCL:
@@ -99,8 +133,9 @@ class FakeWCL:
     def all_reports(self, guild_id, start_time=None, zone_id=None):
         self.queries_made += 1
         reps = [r for r in REPORTS.values() if start_time is None or r["endTime"] >= start_time]
-        # an untracked dungeon report should be ignored
+        # an untracked dungeon report should be ignored, and so should one for a Mythic+ season zone we know about
         reps.append({"code": "DUN", "title": "M+", "startTime": ms("2026-09-01"), "endTime": ms("2026-09-01") + 1, "zone": {"id": 999, "name": "Dungeons"}, "owner": None})
+        reps.append({"code": "DUN2", "title": "M+ keys", "startTime": ms("2026-09-01"), "endTime": ms("2026-09-01") + 1, "zone": {"id": 47, "name": "Mythic+ Season 1"}, "owner": None})
         return reps
 
     def report_fights(self, codes, batch=8):
@@ -119,6 +154,10 @@ class FakeWCL:
     def all_attendance(self, guild_id, zone_id=None, max_pages=20):
         self.queries_made += 1
         return ATTENDANCE.get(zone_id, [])
+
+    def report_rankings(self, code, metric="dps"):
+        self.queries_made += 1
+        return fake_rankings(code, metric)
 
     def rate_limit(self):
         self.queries_made += 1
@@ -219,6 +258,7 @@ def settings(tmp_path) -> Settings:
         wcl_client_id="id", wcl_client_secret="secret",
         guild_name="Killing Time", guild_realm="Draenor", guild_region="EU",
         rival_guilds="Internet Diff@draenor/eu; Nope Guild@draenor/eu",
+        raid_teams="CE Team: Tagrik, Elelena; 6 Hour Team: Bubonic, Sixer",
         rio_realm_scan_pages=1, sync_expansions=2,
         anthropic_api_key="test-key",
         kt_db_path=str(tmp_path / "kt.db"),

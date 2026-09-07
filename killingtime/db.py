@@ -177,7 +177,38 @@ CREATE TABLE IF NOT EXISTS sync_log (
     status TEXT NOT NULL,
     detail TEXT
 );
+
+-- Which raid team a report belongs to (derived after every sync from RAID_TEAMS rosters and attendance).
+CREATE TABLE IF NOT EXISTS report_teams (
+    report_code TEXT PRIMARY KEY REFERENCES reports(code) ON DELETE CASCADE,
+    team TEXT NOT NULL,
+    matches INTEGER NOT NULL
+);
+
+-- Warcraft Logs parses (rankings) per player per kill. metric: dps for tanks/dps, hps for healers.
+CREATE TABLE IF NOT EXISTS parses (
+    report_code TEXT NOT NULL REFERENCES reports(code) ON DELETE CASCADE,
+    fight_id INTEGER NOT NULL,
+    encounter_id INTEGER NOT NULL,
+    difficulty INTEGER,
+    player_name TEXT NOT NULL,
+    server TEXT,                      -- realm name as Warcraft Logs reports it (pugs come from other realms)
+    player_class TEXT,
+    spec TEXT,
+    role TEXT NOT NULL,               -- tanks | healers | dps
+    metric TEXT NOT NULL,             -- dps | hps
+    amount REAL,
+    rank_percent REAL,                -- overall percentile for the spec (0-100)
+    bracket_percent REAL,             -- percentile within the item-level bracket
+    PRIMARY KEY (report_code, fight_id, player_name, metric)
+);
+CREATE INDEX IF NOT EXISTS idx_parses_encounter ON parses(encounter_id, difficulty);
 """
+
+# Columns added after the first release: (table, column, definition).
+MIGRATIONS: list[tuple[str, str, str]] = [
+    ("reports", "rankings_synced_at", "INTEGER"),
+]
 
 VIEWS = """
 DROP VIEW IF EXISTS v_pulls;
@@ -188,11 +219,13 @@ SELECT
     f.difficulty, f.kill, f.start_time, f.end_time,
     (f.end_time - f.start_time) / 1000.0 AS duration_s,
     f.boss_pct, f.fight_pct, f.last_phase, f.size, f.avg_ilvl,
-    date(f.start_time / 1000, 'unixepoch') AS pull_date
+    date(f.start_time / 1000, 'unixepoch') AS pull_date,
+    t.team
 FROM fights f
 JOIN reports r ON r.code = f.report_code
 JOIN encounters e ON e.id = f.encounter_id
-JOIN zones z ON z.id = r.zone_id;
+JOIN zones z ON z.id = r.zone_id
+LEFT JOIN report_teams t ON t.report_code = f.report_code;
 
 DROP VIEW IF EXISTS v_first_kills;
 CREATE VIEW v_first_kills AS
@@ -218,6 +251,31 @@ LEFT JOIN fk ON fk.guild_id = p.guild_id AND fk.zone_id = p.zone_id
 WHERE fk.first_kill_time IS NULL OR p.start_time <= fk.first_kill_time
 GROUP BY p.guild_id, p.zone_id, p.encounter_id, p.difficulty;
 
+-- Same as v_first_kills but per raid team (each team has its own first kill and pull count).
+DROP VIEW IF EXISTS v_team_first_kills;
+CREATE VIEW v_team_first_kills AS
+WITH fk AS (
+    SELECT guild_id, team, zone_id, encounter_id, difficulty, MIN(start_time) AS first_kill_time
+    FROM v_pulls WHERE kill = 1 AND team IS NOT NULL
+    GROUP BY guild_id, team, zone_id, encounter_id, difficulty
+)
+SELECT
+    p.guild_id, p.team, p.zone_id, p.zone_name, p.encounter_id, p.encounter_name, p.encounter_ord, p.difficulty,
+    fk.first_kill_time,
+    date(fk.first_kill_time / 1000, 'unixepoch') AS first_kill_date,
+    MIN(p.start_time) AS first_pull_time,
+    COUNT(*) AS pulls_to_kill,
+    SUM(CASE WHEN p.kill = 0 THEN 1 ELSE 0 END) AS wipes_before_kill,
+    MIN(CASE WHEN p.kill = 0 THEN p.fight_pct END) AS best_wipe_pct,
+    COUNT(DISTINCT p.pull_date) AS nights_to_kill,
+    SUM(p.duration_s) / 3600.0 AS hours_to_kill,
+    CASE WHEN fk.first_kill_time IS NULL THEN 0 ELSE 1 END AS killed
+FROM v_pulls p
+LEFT JOIN fk ON fk.guild_id = p.guild_id AND fk.team = p.team AND fk.zone_id = p.zone_id
+            AND fk.encounter_id = p.encounter_id AND fk.difficulty = p.difficulty
+WHERE p.team IS NOT NULL AND (fk.first_kill_time IS NULL OR p.start_time <= fk.first_kill_time)
+GROUP BY p.guild_id, p.team, p.zone_id, p.encounter_id, p.difficulty;
+
 DROP VIEW IF EXISTS v_raid_nights;
 CREATE VIEW v_raid_nights AS
 SELECT
@@ -233,11 +291,39 @@ SELECT
 FROM v_pulls
 GROUP BY guild_id, zone_id, difficulty, pull_date;
 
+DROP VIEW IF EXISTS v_team_raid_nights;
+CREATE VIEW v_team_raid_nights AS
+SELECT
+    guild_id, team, zone_id, zone_name, difficulty, pull_date,
+    COUNT(*) AS pulls,
+    SUM(kill) AS kills,
+    COUNT(*) - SUM(kill) AS wipes,
+    COUNT(DISTINCT encounter_id) AS bosses_pulled,
+    SUM(duration_s) / 3600.0 AS hours_in_combat,
+    MIN(start_time) AS first_pull_time,
+    MAX(end_time) AS last_pull_time,
+    AVG(avg_ilvl) AS avg_ilvl
+FROM v_pulls
+WHERE team IS NOT NULL
+GROUP BY guild_id, team, zone_id, difficulty, pull_date;
+
 DROP VIEW IF EXISTS v_attendance;
 CREATE VIEW v_attendance AS
 SELECT a.player_name, a.player_class, a.presence, a.report_code,
-       r.guild_id, r.zone_id, r.start_time, date(r.start_time / 1000, 'unixepoch') AS raid_date
-FROM attendance a JOIN reports r ON r.code = a.report_code;
+       r.guild_id, r.zone_id, r.start_time, date(r.start_time / 1000, 'unixepoch') AS raid_date, t.team
+FROM attendance a JOIN reports r ON r.code = a.report_code
+LEFT JOIN report_teams t ON t.report_code = a.report_code;
+
+DROP VIEW IF EXISTS v_parses;
+CREATE VIEW v_parses AS
+SELECT ps.*, r.zone_id, z.name AS zone_name, e.name AS encounter_name, e.ord AS encounter_ord,
+       f.start_time, date(f.start_time / 1000, 'unixepoch') AS kill_date, t.team
+FROM parses ps
+JOIN reports r ON r.code = ps.report_code
+JOIN zones z ON z.id = r.zone_id
+JOIN encounters e ON e.id = ps.encounter_id
+LEFT JOIN fights f ON f.report_code = ps.report_code AND f.fight_id = ps.fight_id
+LEFT JOIN report_teams t ON t.report_code = ps.report_code;
 
 DROP VIEW IF EXISTS v_rio_progress;
 CREATE VIEW v_rio_progress AS
@@ -258,10 +344,13 @@ TABLE_DOCS: dict[str, str] = {
     "guilds": "Every guild we know. is_home=1 is Killing Time; is_rival=1 are configured rivals; others come from the realm leaderboard.",
     "reports": "Warcraft Logs reports (one per raid night, usually) for the home guild.",
     "fights": "One row per boss pull from our logs. kill=1 for kills. fight_pct is % of the encounter remaining on a wipe.",
-    "v_pulls": "fights joined to encounter/zone names, with pull_date and duration_s. Prefer this over fights.",
-    "v_first_kills": "Per guild/zone/boss/difficulty: first kill time, pulls_to_kill (pulls up to and incl. the first kill; all pulls if not killed), wipes_before_kill, nights_to_kill, hours_to_kill, killed flag.",
-    "v_raid_nights": "Per raid night (pull_date) and difficulty: pulls, kills, wipes, bosses_pulled, hours_in_combat.",
-    "attendance / v_attendance": "Who attended each report (presence 1 = present).",
+    "v_pulls": "fights joined to encounter/zone names, with pull_date, duration_s and team (raid team name or NULL). Prefer this over fights.",
+    "v_first_kills": "Per guild/zone/boss/difficulty: first kill time, pulls_to_kill (pulls up to and incl. the first kill; all pulls if not killed), wipes_before_kill, nights_to_kill, hours_to_kill, killed flag. Whole guild.",
+    "v_team_first_kills": "Same as v_first_kills but per raid team (column team). Use when a question is about one team.",
+    "report_teams": "Raid team (e.g. 'CE Team', '6 Hour Team') each report belongs to, derived from RAID_TEAMS rosters and attendance.",
+    "v_raid_nights / v_team_raid_nights": "Per raid night (pull_date) and difficulty: pulls, kills, wipes, bosses_pulled, hours_in_combat (guild-wide / per team).",
+    "attendance / v_attendance": "Who attended each report (presence 1 = present); v_attendance adds team.",
+    "parses / v_parses": "Warcraft Logs parses per player per kill: rank_percent (0-100 percentile for the spec), bracket_percent, amount, role, metric (dps or hps), team, kill_date.",
     "wcl_zone_rankings": "Warcraft Logs world/region/server rank for the home guild per zone (metric progress/speed/completeRaidSpeed).",
     "rio_raids / rio_encounters": "Raider.IO raid and boss reference data (slugs).",
     "rio_summary": "Raider.IO 'X/Y M' summary per guild per raid.",
@@ -281,6 +370,10 @@ def connect(path: str) -> sqlite3.Connection:
     if path != ":memory:":
         conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    for table, column, definition in MIGRATIONS:
+        cols = {c["name"] for c in conn.execute(f"PRAGMA table_info('{table}')")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     conn.executescript(VIEWS)
     conn.commit()
     return conn

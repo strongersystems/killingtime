@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Peers{% endblock %}
+{% block content %}
+{% if not raid %}
+<div class="page-head"><h1>Guilds around our level</h1></div>
+<div class="card"><p>No Raider.IO standings yet. Run a sync first (Raider.IO needs no credentials).</p></div>
+{% else %}
+<div class="page-head">
+  <div><h1>Guilds around our level <span class="pill {{ cmp.difficulty_name|lower }}">{{ cmp.difficulty_name }}</span>{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1>
+  <small>{{ raid.name }}: {{ cmp.peer_count }} guilds within ±{{ cmp.band }} boss{{ 'es' if cmp.band != 1 }} of our {{ cmp.our_kills }}/{{ cmp.total_bosses }} on Raider.IO
+    (realm leaderboard and rivals), not the top of the server. Our pulls come from {{ 'our logs' if cmp.source == 'logs' else 'Raider.IO' }}.</small></div>
+  <div class="filters">
+    <form method="get" action="/peers">
+      <select class="control" name="raid" onchange="this.form.submit()">
+        {% for r in raids %}<option value="{{ r.slug }}" {{ 'selected' if r.slug == raid.slug }}>{{ r.name }}</option>{% endfor %}
+      </select>
+      <input type="hidden" name="difficulty" value="{{ difficulty }}">
+      {% if team %}<input type="hidden" name="team" value="{{ team }}">{% endif %}
+    </form>
+    <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link('/peers', raid=raid.slug, difficulty=d, team=team) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
+  </div>
+</div>
+
+{% if not cmp.peer_count %}
+<div class="card"><p>No comparable guilds found for {{ raid.name }} {{ cmp.difficulty_name }}{% if team %} for {{ team }}{% endif %}. {% if team %}This team may not have logged pulls in this raid.{% else %}Try another difficulty.{% endif %}</p></div>
+{% else %}
+<div class="tiles">
+  <div class="tile hero"><div class="label">Our progress</div><div class="value">{{ cmp.our_kills }}<span class="muted">/{{ cmp.total_bosses }}</span></div>
+    <div class="sub">peer median {{ cmp.peer_kills_median if cmp.peer_kills_median is not none else '—' }}/{{ cmp.total_bosses }}</div></div>
+  <div class="tile"><div class="label">Pulls on killed bosses</div><div class="value">{{ cmp.our_total_pulls|num if cmp.our_total_pulls else '—' }}</div>
+    <div class="sub">peer median {{ cmp.peer_median_total_pulls|num if cmp.peer_median_total_pulls else '—' }} on the same bosses</div></div>
+  <div class="tile"><div class="label">Pull efficiency</div><div class="value">{{ (cmp.overall_beat_pct ~ '%') if cmp.overall_beat_pct is not none else '—' }}</div>
+    <div class="sub">of peers needed more pulls than us</div></div>
+  <div class="tile"><div class="label">Peer group</div><div class="value">{{ cmp.peer_count }}</div><div class="sub">guilds at {{ cmp.our_kills - cmp.band if cmp.our_kills - cmp.band > 0 else 1 }}–{{ [cmp.our_kills + cmp.band, cmp.total_bosses]|min }} bosses</div></div>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <h2>Boss by boss vs peers</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>#</th><th>Boss</th><th>Our kill</th><th class="num">Our pulls</th><th class="num">Peer median</th><th class="num">Peer avg</th><th class="num">P25–P75</th><th class="num">Beat</th><th class="num">Our day</th><th class="num">Typical day</th><th class="num">Peers killed</th></tr></thead>
+    <tbody>
+    {% for b in cmp.bosses %}
+    <tr class="{{ 'killed' if b.killed }}">
+      <td>{{ b.ord }}</td><td>{{ b.boss }}</td>
+      <td>{{ b.our_first_kill or ('in progress' if b.our_pulls else '—') }}</td>
+      <td class="num">{{ b.our_pulls if b.our_pulls else '—' }}{% if b.our_pulls and not b.killed %}+{% endif %}</td>
+      <td class="num">{{ b.peer_median_pulls if b.peer_median_pulls is not none else '—' }}</td>
+      <td class="num">{{ b.peer_mean_pulls if b.peer_mean_pulls is not none else '—' }}</td>
+      <td class="num">{% if b.peer_p25_pulls is not none %}{{ b.peer_p25_pulls|round(0)|int }}–{{ b.peer_p75_pulls|round(0)|int }}{% else %}—{% endif %}</td>
+      <td class="num">{% if b.beat_pct is not none and b.killed %}<span class="pill {{ 'good' if b.beat_pct >= 50 else ('bad' if b.beat_pct < 25) }}">{{ b.beat_pct }}%</span>{% else %}—{% endif %}</td>
+      <td class="num">{{ b.our_days if b.our_days is not none else '—' }}</td>
+      <td class="num">{{ b.peer_median_days if b.peer_median_days is not none else '—' }}</td>
+      <td class="num">{{ b.peers_killed }}/{{ cmp.peer_count }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">Pulls to first kill (a trailing “+” means still in progress). <b>Beat</b> = share of peers who needed more pulls than us on that boss.
+    <b>Day</b> = days from the guild's first pull in this raid to the kill; typical = peer median. Guilds that hide pull counts on Raider.IO only count towards kill dates.</p>
+</div>
+
+<div class="grid two" id="charts"></div>
+
+{% if prev and prev.peer_count %}
+<div class="card" style="margin-top:1rem">
+  <h2>Last tier: {{ prev_raid.name }} <span class="tools"><a href="{{ link('/peers', raid=prev_raid.slug, difficulty=difficulty, team=team) }}">open →</a></span></h2>
+  <div class="tiles">
+    <div class="tile"><div class="label">Progress</div><div class="value small">{{ prev.our_kills }}/{{ prev.total_bosses }}</div><div class="sub">peer median {{ prev.peer_kills_median }}</div></div>
+    <div class="tile"><div class="label">Pulls on killed bosses</div><div class="value small">{{ prev.our_total_pulls|num if prev.our_total_pulls else '—' }}</div><div class="sub">peer median {{ prev.peer_median_total_pulls|num if prev.peer_median_total_pulls else '—' }}</div></div>
+    <div class="tile"><div class="label">Pull efficiency</div><div class="value small">{{ (prev.overall_beat_pct ~ '%') if prev.overall_beat_pct is not none else '—' }}</div><div class="sub">of {{ prev.peer_count }} peers needed more pulls</div></div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top:1rem">
+  <h2>The peer group</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Guild</th><th>Realm</th><th class="num">Killed</th><th class="num">Pulls</th><th class="num">Realm #</th><th class="num">World #</th></tr></thead>
+    <tbody>{% for g in cmp.peers %}<tr class="{{ 'rival' if g.is_rival }}"><td>{{ g.name }}</td><td class="muted">{{ g.realm }}</td><td class="num">{{ g.killed }}/{{ cmp.total_bosses }}</td><td class="num">{{ g.pulls|num if g.pulls else 'hidden' }}</td><td class="num">{{ g.realm_rank or '—' }}</td><td class="num">{{ g.world_rank|num if g.world_rank else '—' }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if raid and cmp.peer_count %}
+<script>
+(function () {
+  const data = {{ chart_data|safe }};
+  const root = document.getElementById("charts");
+  const cmp = data.cmp;
+  const killed = cmp.bosses.filter((b) => b.our_pulls || b.peer_median_pulls !== null);
+  if (killed.length) {
+    KT.mount(root, {
+      title: "Pulls to kill: us vs peers", type: "bar", labels: killed.map((b) => b.boss),
+      series: [
+        { name: "Us", data: killed.map((b) => b.our_pulls ?? null) },
+        { name: "Peer median", data: killed.map((b) => b.peer_median_pulls) },
+        { name: "Peer P75", data: killed.map((b) => b.peer_p75_pulls) },
+      ],
+      yTitle: "pulls", note: "Lower is better. Our bar for an unkilled boss is pulls so far.",
+    });
+  }
+  const dated = cmp.bosses.filter((b) => b.our_days !== null || b.peer_median_days !== null);
+  if (dated.length) {
+    KT.mount(root, {
+      title: "Days into the tier at each kill", type: "line", labels: dated.map((b) => b.boss),
+      series: [
+        { name: "Us", data: dated.map((b) => b.our_days), emphasis: true },
+        { name: "Typical peer (median)", data: dated.map((b) => b.peer_median_days) },
+        { name: "Peer P25", data: dated.map((b) => b.peer_p25_days) },
+        { name: "Peer P75", data: dated.map((b) => b.peer_p75_days) },
+      ],
+      yTitle: "days since first pull", xTitle: "boss", note: "Where we sit against the typical pace of guilds at our level.",
+    });
+  }
+  const beat = cmp.bosses.filter((b) => b.beat_pct !== null && b.killed);
+  if (beat.length) {
+    KT.mount(root, {
+      title: "Percentile of peers out-pulled per boss", type: "hbar", labels: beat.map((b) => b.boss),
+      series: [{ name: "% of peers needing more pulls", data: beat.map((b) => b.beat_pct) }], yTitle: "% of peers", yMax: 100,
+    });
+  }
+  if (data.prev && data.prev.peer_count) {
+    const p = data.prev.bosses.filter((b) => b.our_pulls && b.killed);
+    if (p.length) {
+      KT.mount(root, {
+        title: `Last tier (${data.prev_raid.name}): pulls vs peers`, type: "bar", labels: p.map((b) => b.boss),
+        series: [{ name: "Us", data: p.map((b) => b.our_pulls) }, { name: "Peer median", data: p.map((b) => b.peer_median_pulls) }],
+        yTitle: "pulls",
+      });
+    }
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

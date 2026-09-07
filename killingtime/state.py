@@ -26,8 +26,28 @@ def configured(settings: Settings) -> bool:
     return bool(settings.kt_state_url and settings.kt_state_secret)
 
 
-def _url(settings: Settings) -> str:
-    return settings.kt_state_url.rstrip("/") + "/_internal/db"
+def _url(settings: Settings, path: str = "/_internal/db") -> str:
+    return settings.kt_state_url.rstrip("/") + path
+
+
+def publish_page(settings: Settings, html: str, http: httpx.Client | None = None) -> bool:
+    """Upload the rendered public site so the Worker can serve it without waking the container."""
+    if not configured(settings):
+        return False
+    client = http or httpx.Client(timeout=60)
+    try:
+        resp = client.put(
+            _url(settings, "/_internal/public"), content=html.encode("utf-8"),
+            headers={HEADER: settings.kt_state_secret, "Content-Type": "text/html; charset=utf-8"},
+        )
+    except httpx.HTTPError as exc:
+        log.warning("public page publish failed: %s", exc)
+        return False
+    if resp.status_code >= 300:
+        log.warning("public page publish failed: HTTP %s %s", resp.status_code, resp.text[:200])
+        return False
+    log.info("published public page (%d bytes)", len(html))
+    return True
 
 
 def restore_if_missing(settings: Settings, http: httpx.Client | None = None) -> bool:
