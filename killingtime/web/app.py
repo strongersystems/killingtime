@@ -285,6 +285,12 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
         with db_lock:
             return as_json(metrics.boss_pulls(conn, zone_id, encounter_id, difficulty, team))
 
+    @app.get("/api/alts")
+    def api_alts(min_nights: int = 3):
+        """Characters that look like alts of someone already on the roster. Suggestions only - confirm in RAID_ALTS."""
+        with db_lock:
+            return as_json(metrics.alt_candidates(conn, min_nights=min_nights))
+
     @app.get("/api/meet/{zone_id}")
     def api_meet(zone_id: int, difficulty: int | None = None, team: str | None = None):
         with db_lock:

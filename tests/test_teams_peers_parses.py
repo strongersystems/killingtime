@@ -463,3 +463,31 @@ def test_raid_schedule_and_join_page(synced):
     assert "Killing Time" in html and "How to apply" in html and "Come and raid" in html
     client = TestClient(create_app(settings, conn))
     assert client.get("/public/join").status_code == 200
+
+
+def test_alt_candidates_and_merge(synced):
+    """Alt detection suggests, RAID_ALTS decides, and a confirmed alt's nights count towards its main."""
+    conn, *_ = synced
+    cands = metrics.alt_candidates(conn, min_nights=1)
+    assert isinstance(cands, list)
+    for row in cands:
+        assert row["candidates"] and row["player"] not in [c["name"] for c in row["candidates"]]
+        for c in row["candidates"]:
+            # the whole point: a candidate never shares a raid night with its main
+            shared = conn.execute(
+                """SELECT COUNT(*) AS n FROM (
+                       SELECT raid_date FROM v_attendance WHERE presence = 1 AND player_name = ?
+                       INTERSECT SELECT raid_date FROM v_attendance WHERE presence = 1 AND player_name = ?)""",
+                (row["player"], c["name"]),
+            ).fetchone()["n"]
+            assert shared == 0, f"{row['player']} raided with {c['name']}"
+            assert 0 <= c["score"] <= 1
+
+    history = metrics.career_history(conn)
+    main = next(n for n, h in history.items() if h["total_raids"] >= 1)
+    alt = next(n for n, h in history.items() if n != main and h["total_raids"] >= 1)
+    merged = metrics.merge_alt_history(history, {main: [alt]})
+    assert merged[main]["total_raids"] >= history[main]["total_raids"] + 1
+    assert merged[main]["tier_count"] >= history[main]["tier_count"]
+    assert merged[main]["alt_characters"] == [alt]
+    assert merged[alt] == history[alt]  # the alt's own row is left alone

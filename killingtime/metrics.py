@@ -977,6 +977,50 @@ def _slug(name: str) -> str:
     return _re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")
 
 
+def merge_alt_history(history: dict[str, dict[str, Any]], alts: dict[str, list[str]]) -> dict[str, dict[str, Any]]:
+    """Fold each raider's alts into their own history: one person, one career.
+
+    A tier they raided on an alt counts as a tier they raided, and the nights add up. Which characters belong to
+    whom is not in any API, so this only ever uses the confirmed RAID_ALTS mapping."""
+    if not alts:
+        return history
+    by_slug = {_slug(name): name for name in history}
+    merged = {k: dict(v) for k, v in history.items()}
+    for main, alt_names in alts.items():
+        key = by_slug.get(_slug(main), main)
+        me = merged.get(key)
+        others = [(a, history[by_slug[_slug(a)]]) for a in alt_names if _slug(a) in by_slug]
+        if not others:
+            continue
+        if me is None:
+            me = {"tiers": [], "tier_count": 0, "total_raids": 0, "since": None, "first_tier": None}
+            merged[key] = me
+        tiers: dict[int, dict] = {t["zone_id"]: dict(t) for t in me.get("tiers") or []}
+        for _, other in others:
+            for t in other.get("tiers") or []:
+                cur = tiers.get(t["zone_id"])
+                if not cur:
+                    tiers[t["zone_id"]] = dict(t)
+                    continue
+                cur["raids"] = (cur.get("raids") or 0) + (t.get("raids") or 0)
+                cur["kills"] = (cur.get("kills") or 0) + (t.get("kills") or 0)
+                if t.get("first") and (not cur.get("first") or t["first"] < cur["first"]):
+                    cur["first"] = t["first"]
+                if t.get("parse") is not None and cur.get("parse") is not None:
+                    cur["parse"] = round((cur["parse"] + t["parse"]) / 2, 1)
+                elif t.get("parse") is not None:
+                    cur["parse"] = t["parse"]
+        rows = sorted(tiers.values(), key=lambda t: t["zone_id"], reverse=True)
+        firsts = [t["first"] for t in rows if t.get("first")]
+        me["tiers"] = rows
+        me["tier_count"] = sum(1 for t in rows if t.get("raids"))
+        me["total_raids"] = sum(t.get("raids") or 0 for t in rows)
+        me["since"] = min(firsts) if firsts else me.get("since")
+        me["first_tier"] = next((t["tier"] for t in reversed(rows) if t.get("raids")), me.get("first_tier"))
+        me["alt_characters"] = [a for a, _ in others]
+    return merged
+
+
 def career_history(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     """Every raider's history from our own logs: tiers raided, nights per tier and how they parsed in each."""
     tiers_by_id = {t["id"]: t for t in _rows(conn, "SELECT id, name FROM zones")}
@@ -1042,16 +1086,16 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
 
     from . import flavour
 
-    alts = alts or {}
     home = home_guild(conn)
     guild_name = home["name"] if home else ""
     realm = f"{(home['realm_slug'] if home else '').title()} {(home['region'] if home else '').upper()}".strip()
     zone = conn.execute("SELECT name, rio_raid_slug FROM zones WHERE id = ?", (zone_id,)).fetchone()
     zone_slug = zone["rio_raid_slug"] if zone else None
     data = roster(conn, zone_id, difficulty, team)
+    alts = alts or {}
     # Characters are keyed by name: a guild member may be on another realm, and names are unique within a raid.
     chars = {r["name"]: r for r in _rows(conn, "SELECT * FROM characters WHERE missing = 0")}
-    history = career_history(conn)
+    history = merge_alt_history(career_history(conn), alts)
     cut_sql, cut_p = _before_cutoff(zone_cutoff(conn, zone_id), "start_time")
     df_sql, df_p = (" AND difficulty = ?", (difficulty,)) if difficulty else ("", ())
     tm_sql, tm_p = (" AND team = ?", (team,)) if team else ("", ())
@@ -1262,6 +1306,64 @@ def raid_schedule(conn: sqlite3.Connection, team: str | None = None, months: int
         "sample_nights": sum(len(v) for v in nights.values()),
         "months": months,
     }
+
+
+def alt_candidates(conn: sqlite3.Connection, min_nights: int = 3, limit_per_main: int = 4) -> list[dict[str, Any]]:
+    """Characters that look like they belong to a raider we already know, ranked by how strong the evidence is.
+
+    Nobody can play two characters on the same night, so an alt's raid nights never overlap its main's. That alone
+    is weak - people who joined after somebody left never overlap either - so a candidate also has to be *interleaved*
+    with the main: raiding inside the same span of months, on nights the main missed. This suggests; it never
+    decides. Confirmed pairs go in RAID_ALTS, which is the only thing the app treats as fact."""
+    nights: dict[str, set[str]] = {}
+    first_last: dict[str, tuple[str, str]] = {}
+    classes: dict[str, str] = {}
+    for r in _rows(
+        conn,
+        """SELECT player_name, raid_date FROM v_attendance WHERE presence = 1""",
+    ):
+        nights.setdefault(r["player_name"], set()).add(r["raid_date"])
+    for name, ds in nights.items():
+        first_last[name] = (min(ds), max(ds))
+    for r in _rows(conn, "SELECT DISTINCT player_name, player_class FROM v_parses WHERE player_class IS NOT NULL"):
+        classes.setdefault(r["player_name"], r["player_class"])
+
+    all_nights = sorted({d for ds in nights.values() for d in ds})
+    active = {n: ds for n, ds in nights.items() if len(ds) >= min_nights}
+    out = []
+    for main, main_nights in active.items():
+        mf, ml = first_last[main]
+        cands = []
+        for other, other_nights in active.items():
+            if other == main or main_nights & other_nights:
+                continue   # they raided together, so they are two different people
+            of, ol = first_last[other]
+            if of > ml or ol < mf:
+                continue   # their careers never overlap: a replacement, not an alt
+            # Nights inside the overlap that one attended and the other missed, in both directions.
+            lo, hi = max(mf, of), min(ml, ol)
+            window = [d for d in all_nights if lo <= d <= hi]
+            if len(window) < min_nights * 2:
+                continue
+            mine = sum(1 for d in window if d in main_nights)
+            theirs = sum(1 for d in window if d in other_nights)
+            if not mine or not theirs:
+                continue
+            covered = (mine + theirs) / len(window)      # how much of the window the pair covers between them
+            balance = min(mine, theirs) / max(mine, theirs)
+            cands.append({
+                "name": other, "class": classes.get(other), "nights": len(other_nights),
+                "shared_window": len(window), "their_nights_in_window": theirs, "our_nights_in_window": mine,
+                "coverage": round(covered, 2), "balance": round(balance, 2),
+                "score": round(covered * (0.5 + 0.5 * balance) * min(1.0, len(other_nights) / 10), 3),
+                "first": of, "last": ol,
+            })
+        cands.sort(key=lambda c: -c["score"])
+        if cands:
+            out.append({"player": main, "class": classes.get(main), "nights": len(main_nights),
+                        "first": mf, "last": ml, "candidates": cands[:limit_per_main]})
+    out.sort(key=lambda r: -r["candidates"][0]["score"])
+    return out
 
 
 def unattributed_reports(conn: sqlite3.Connection, zone_id: int) -> int:
