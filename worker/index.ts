@@ -5,8 +5,10 @@
  *    the FastAPI app on port 8000, with an optional shared password (SITE_PASSWORD) on the pages that cost money or
  *    trigger work.
  *  - killingtime.fyi / www (SITE_HOSTS): the public guild site. The container renders it after every sync and PUTs
- *    the HTML to /_internal/public; the Worker serves that copy from Durable Object storage, so visitors never wake
- *    the container. If nothing has been published yet the request falls through to the container's /public page.
+ *    the HTML to /_internal/public (and each extra page, such as Meet the Team, to /_internal/public/<name>); the
+ *    Worker serves those copies from Durable Object storage, so visitors never wake the container. If nothing has
+ *    been published yet the request falls through to the container's live page. /static/* is proxied to the
+ *    container and cached at the edge, which is how the member portraits reach the public site.
  *  - /_internal/db: the container uploads/downloads a gzipped SQLite snapshot here; it is stored in the
  *    Durable Object's own SQLite storage in 1 MB chunks, so the data survives container restarts.
  *  - Cron trigger: wakes the container and starts an incremental sync.
@@ -89,6 +91,12 @@ export class KTContainer extends Container<Env> {
     }
     if (url.pathname === "/_internal/public") {
       return this.handlePage(request, "public");
+    }
+    // Extra public pages (currently "team"): same storage, one row per page name.
+    if (url.pathname.startsWith("/_internal/public/")) {
+      const name = url.pathname.slice("/_internal/public/".length);
+      if (/^[a-z0-9-]{1,32}$/.test(name)) return this.handlePage(request, name);
+      return new Response("bad page name", { status: 400 });
     }
     return super.fetch(request);
   }
@@ -197,11 +205,29 @@ async function servePublicSite(request: Request, env: Env, url: URL): Promise<Re
   }
   if (url.pathname === "/_healthz") return new Response("ok");
   if (url.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain" } });
-  if (url.pathname !== "/" && url.pathname !== "/index.html") {
+  // Portraits, CSS and the like come from the container, cached hard at the edge so it is woken rarely.
+  if (url.pathname.startsWith("/static/")) {
+    const asset = await container.fetch(new Request(`${env.PUBLIC_URL}${url.pathname}`));
+    if (!asset.ok) return new Response("not found", { status: 404 });
+    const headers = new Headers(asset.headers);
+    headers.set("Cache-Control", "public, max-age=86400");
+    return new Response(asset.body, { status: asset.status, headers });
+  }
+  // Page name -> stored page. "/" is the front page; "/team" is Meet the Team.
+  const PAGES: Record<string, { name: string; live: string }> = {
+    "/": { name: "public", live: "/public" },
+    "/index.html": { name: "public", live: "/public" },
+    "/team": { name: "team", live: "/public/team" },
+    "/team/": { name: "team", live: "/public/team" },
+    "/meet": { name: "team", live: "/public/team" },
+  };
+  const page = PAGES[url.pathname];
+  if (!page) {
     return Response.redirect(`https://${apex}/`, 302);
   }
+  const path = page.name === "public" ? "/_internal/public" : `/_internal/public/${page.name}`;
   const stored = await container.fetch(
-    new Request(`${env.PUBLIC_URL}/_internal/public`, { headers: { [SECRET_HEADER]: env.KT_STATE_SECRET } }),
+    new Request(`${env.PUBLIC_URL}${path}`, { headers: { [SECRET_HEADER]: env.KT_STATE_SECRET } }),
   );
   if (stored.ok) {
     return new Response(stored.body, {
@@ -212,8 +238,8 @@ async function servePublicSite(request: Request, env: Env, url: URL): Promise<Re
       },
     });
   }
-  // Nothing published yet (first deploy): render live from the container.
-  const live = await container.fetch(new Request(`${env.PUBLIC_URL}/public`, { headers: request.headers }));
+  // Nothing published yet (first deploy, or a page added since the last sync): render live from the container.
+  const live = await container.fetch(new Request(`${env.PUBLIC_URL}${page.live}`, { headers: request.headers }));
   return new Response(live.body, { status: live.status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 }
 

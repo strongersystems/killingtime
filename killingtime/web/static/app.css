@@ -217,7 +217,8 @@ tr.post td:first-child::before { content: "✓ "; color: var(--muted); }
 .portrait-stack .portrait { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; }
 .portrait-stack.animated { cursor: pointer; }
 .portrait-stack.animated:hover, .portrait-stack:focus-visible { border-color: var(--accent); }
-.portrait-stack .frame-badge { position: absolute; right: .25rem; bottom: .2rem; font-size: .6rem; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 85%, transparent); border-radius: 999px; padding: 0 .35rem; pointer-events: none; }
+.portrait-stack .frame-badge { position: absolute; right: .25rem; bottom: .2rem; font-size: .6rem; line-height: 1.5; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 85%, transparent); border: 0; border-radius: 999px; padding: 0 .4rem; cursor: pointer; font-family: inherit; }
+.portrait-stack .frame-badge:hover { background: var(--accent); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: .5rem .6rem; border-top: 1px solid var(--grid); padding-top: .6rem; }
 .stat-grid .label { display: block; font-size: .65rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .stat-grid b { font-size: 1rem; }

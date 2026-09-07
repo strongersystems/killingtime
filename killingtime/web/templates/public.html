@@ -1,91 +1,5 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ settings.name }} · {{ settings.realm }} {{ settings.region }} raiding guild</title>
-  <meta name="description" content="{{ settings.name }} - {{ guild.faction|default('', true)|capitalize }} raiding guild on {{ settings.realm }} {{ settings.region }}.{% if current %} {{ current.name }}: {{ current.summary }}.{% endif %} Progress, latest kills and how to join.">
-  {% if settings.site_url %}<link rel="canonical" href="{{ settings.site_url }}/">{% endif %}
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23151412'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%23e8b04a' font-family='sans-serif'%3E%E2%9A%94%3C/text%3E%3C/svg%3E">
-  <style>
-    :root { color-scheme: dark; --bg: #0f0e0c; --surface: #17161350; --surface-2: #1f1d19; --ink: #f3efe6; --ink-2: #c9c2b4; --muted: #8b8577;
-            --border: rgba(255,255,255,.09); --gold: #e8b04a; --mythic: #ff8000; --heroic: #a335ee; --normal: #1e8fff; --good: #39c06a; }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
-    body { background: radial-gradient(1200px 500px at 50% -10%, #2a2318 0%, var(--bg) 60%); }
-    a { color: var(--gold); text-decoration: none; } a:hover { text-decoration: underline; }
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 1.25rem; }
-    header { padding: 1.2rem 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-    .brand { font-weight: 800; font-size: 1.15rem; letter-spacing: .01em; display: flex; align-items: center; gap: .6rem; color: var(--ink); }
-    .brand small { font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
-    .links { display: flex; gap: .4rem; flex-wrap: wrap; }
-    .links a { border: 1px solid var(--border); border-radius: 999px; padding: .35rem .85rem; color: var(--ink-2); font-size: .85rem; background: var(--surface-2); }
-    .links a:hover { color: var(--ink); text-decoration: none; border-color: var(--gold); }
-    .links a.primary { background: var(--gold); color: #1a1408; border-color: var(--gold); font-weight: 700; }
-    .hero { padding: 2.5rem 0 1.5rem; }
-    .hero h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 850; letter-spacing: -.02em; line-height: 1.05; }
-    .hero .kicker { margin-top: .5rem; font-size: 1.15rem; font-weight: 700; color: var(--ink-2); letter-spacing: .01em; }
-    .hero .kicker span { color: var(--gold); }
-    .hero p { color: var(--ink-2); max-width: 60ch; font-size: 1.05rem; margin: .8rem 0 0; }
-    .recruit { display: inline-flex; align-items: center; gap: .5rem; margin-top: 1rem; padding: .5rem .9rem; border-radius: 10px; background: rgba(232,176,74,.12); border: 1px solid rgba(232,176,74,.35); color: var(--ink); font-weight: 600; }
-    .recruit::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(57,192,106,.2); }
-    section { margin: 1.5rem 0; }
-    h2 { font-size: 1.05rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 .8rem; font-weight: 700; }
-    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
-    .card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.2rem; }
-    .card.big { grid-column: 1 / -1; }
-    .tier-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-    .tier-head h3 { margin: 0; font-size: 1.5rem; font-weight: 800; }
-    .tier-head small { color: var(--muted); }
-    .diffs { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 1rem; }
-    .diff .label { display: flex; justify-content: space-between; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
-    .diff .value { font-size: 2.2rem; font-weight: 800; line-height: 1.1; margin: .1rem 0 .3rem; }
-    .diff .value small { font-size: 1rem; color: var(--muted); font-weight: 600; }
-    .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; }
-    .bar > span { display: block; height: 100%; border-radius: 4px; }
-    .m .label, .m .value { color: var(--mythic); } .m .bar > span { background: var(--mythic); }
-    .h .label, .h .value { color: var(--heroic); } .h .bar > span { background: var(--heroic); }
-    .n .label, .n .value { color: var(--normal); } .n .bar > span { background: var(--normal); }
-    .diff .sub { font-size: .85rem; color: var(--ink-2); margin-top: .35rem; }
-    .ranks { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
-    .rank { border: 1px solid var(--border); border-radius: 10px; padding: .45rem .7rem; font-size: .85rem; color: var(--ink-2); background: rgba(255,255,255,.02); }
-    .rank b { color: var(--ink); font-size: 1rem; }
-    .teams { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-    .team h3 { margin: 0 0 .5rem; font-size: 1.1rem; display: flex; align-items: center; gap: .5rem; }
-    .team h3 .tag { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
-    .team .row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .35rem 0; border-top: 1px solid var(--border); font-size: .95rem; }
-    .team .row:first-of-type { border-top: 0; }
-    .pill { display: inline-block; padding: .05rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 700; border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap; }
-    .pill.ce { color: var(--good); border-color: rgba(57,192,106,.5); font-size: .7rem; }
-    .pill.m { color: var(--mythic); border-color: rgba(255,128,0,.5); } .pill.h { color: var(--heroic); border-color: rgba(163,53,238,.5); } .pill.n { color: var(--normal); border-color: rgba(30,143,255,.5); }
-    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
-    th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-    th { color: var(--muted); font-weight: 700; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
-    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .scroll { overflow-x: auto; }
-    .muted { color: var(--muted); }
-    .join p { margin: .3rem 0; color: var(--ink-2); }
-    .cta { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .9rem; }
-    .cta a { display: inline-block; padding: .6rem 1rem; border-radius: 10px; font-weight: 700; border: 1px solid var(--border); color: var(--ink); background: rgba(255,255,255,.03); }
-    .cta a.primary { background: var(--gold); color: #1a1408; border-color: var(--gold); }
-    .cta a:hover { text-decoration: none; border-color: var(--gold); }
-    footer { margin: 2.5rem 0 1.5rem; color: var(--muted); font-size: .8rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-    @media (max-width: 640px) { .hero { padding-top: 1.5rem; } .diff .value { font-size: 1.8rem; } }
-  </style>
-</head>
-<body>
-<div class="wrap">
-  <header>
-    <a class="brand" href="/">⚔ {{ settings.name }} <small>{{ guild.faction|default('', true) }} · {{ settings.realm }} {{ settings.region }}</small></a>
-    <nav class="links">
-      {% if links.apply %}<a class="primary" href="{{ links.apply }}" target="_blank" rel="noopener">Apply</a>{% endif %}
-      {% if links.discord %}<a href="{{ links.discord }}" target="_blank" rel="noopener">Discord</a>{% endif %}
-      <a href="{{ links.raiderio }}" target="_blank" rel="noopener">Raider.IO</a>
-      <a href="{{ links.warcraftlogs }}" target="_blank" rel="noopener">Warcraft Logs</a>
-      {% if links.progress %}<a href="{{ links.progress }}">Progress tracker</a>{% endif %}
-    </nav>
-  </header>
-
+{% extends "public_base.html" %}
+{% block content %}
   <section class="hero">
     <h1>{{ settings.name }}</h1>
     <div class="kicker"><span>{{ guild.faction|default('', true)|capitalize }}</span> raiding guild · {{ settings.realm }} {{ settings.region }}</div>
@@ -144,6 +58,17 @@
   {% endif %}
   {% endif %}
 
+  <section>
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+      <div>
+        <h3 style="margin:0 0 .2rem;font-size:1.2rem">Meet the team</h3>
+        <p class="muted" style="margin:0">Who actually raids: bios from their own attendance and parses, and a portrait
+          of each of them in the transmog they are wearing right now.</p>
+      </div>
+      <a class="pill" href="/team" style="padding:.5rem 1rem;font-size:.9rem">See the roster →</a>
+    </div>
+  </section>
+
   {% if latest_kills %}
   <section>
     <h2>Latest kills</h2>
@@ -184,26 +109,4 @@
   </section>
   {% endif %}
 
-  <section class="join">
-    <h2>Join us</h2>
-    <div class="card">
-      {% if settings.about %}<p>{{ settings.about }}</p>{% endif %}
-      {% if settings.raid_times %}<p><b>Raid times:</b> {{ settings.raid_times }}</p>{% endif %}
-      {% if not settings.about and not settings.raid_times %}<p>Interested in raiding with us? Have a look at our logs and Raider.IO profile, then get in touch{% if links.discord %} on Discord{% endif %}.</p>{% endif %}
-      <div class="cta">
-        {% if links.apply %}<a class="primary" href="{{ links.apply }}" target="_blank" rel="noopener">Apply to {{ settings.name }}</a>{% endif %}
-        {% if links.discord %}<a href="{{ links.discord }}" target="_blank" rel="noopener">Join our Discord</a>{% endif %}
-        <a href="{{ links.raiderio }}" target="_blank" rel="noopener">Raider.IO profile</a>
-        <a href="{{ links.warcraftlogs }}" target="_blank" rel="noopener">Warcraft Logs</a>
-        {% if links.armory %}<a href="{{ links.armory }}" target="_blank" rel="noopener">Armory</a>{% endif %}
-      </div>
-    </div>
-  </section>
-
-  <footer>
-    <span>Updated {{ generated_at }}{% if last_sync %} · data synced {{ last_sync }}{% endif %} · refreshes automatically after every sync</span>
-    <span>Data from <a href="https://www.warcraftlogs.com">Warcraft Logs</a> and <a href="https://raider.io">Raider.IO</a>{% if links.progress %} · <a href="{{ links.progress }}">progress tracker</a>{% endif %}</span>
-  </footer>
-</div>
-</body>
-</html>
+{% endblock %}

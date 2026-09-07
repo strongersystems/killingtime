@@ -915,13 +915,14 @@ def run_sync(
         if configured(settings):
             progress("snapshot uploaded" if persist(settings) else "warning: snapshot upload failed")
             try:
-                from .public import render_public_page
+                from .public import render_public_page, render_public_team_page
 
-                html = render_public_page(conn, settings)
+                pages = {"public": render_public_page(conn, settings), "team": render_public_team_page(conn, settings)}
             except Exception as exc:  # noqa: BLE001 - the public page must never fail the sync
                 stats.warn(f"public site render failed: {exc}", progress)
             else:
-                progress("public site published" if publish_page(settings, html) else "warning: public site publish failed")
+                ok = all(publish_page(settings, html, name=name) for name, html in pages.items())
+                progress("public site published" if ok else "warning: public site publish failed")
     except Exception as exc:  # noqa: BLE001 - we want the log row to capture any failure
         status = "error"
         stats.warn(f"sync failed: {exc}", progress)

@@ -427,6 +427,14 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
         with db_lock:
             return HTMLResponse(render_public_page(conn, settings))
 
+    @app.get("/public/team", response_class=HTMLResponse)
+    def public_team_page():
+        """Meet the Team as the public site shows it (killingtime.fyi/team)."""
+        from ..public import render_public_team_page
+
+        with db_lock:
+            return HTMLResponse(render_public_team_page(conn, settings))
+
     # ------------------------------------------------------------------ api
     @app.post("/api/sync")
     def api_sync(full: bool = False):

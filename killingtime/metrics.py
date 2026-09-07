@@ -1007,6 +1007,23 @@ def career_history(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     return out
 
 
+# Warcraft Logs reports a player's role from what they did in the fight, which mislabels healers who were told to
+# help with damage. The spec is unambiguous, so it wins when we know it.
+HEALER_SPECS = {"Restoration", "Holy", "Discipline", "Mistweaver", "Preservation"}
+TANK_SPECS = {"Protection", "Blood", "Guardian", "Vengeance", "Brewmaster"}
+
+
+def role_from_spec(spec: str | None, cls: str | None, fallback: str | None) -> str | None:
+    """tanks / healers / dps from the spec name (Holy is a healer on a Priest or Paladin, never a Warrior)."""
+    if not spec:
+        return fallback
+    if spec in TANK_SPECS:
+        return "tanks"
+    if spec in HEALER_SPECS:
+        return "healers" if spec != "Holy" or cls in {"Priest", "Paladin"} else "dps"
+    return "dps"
+
+
 def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None = None, team: str | None = None,
                    min_raids: int = 2, alts: dict[str, list[str]] | None = None,
                    image_url: str = "/static/members/{slug}/{n}.webp") -> list[dict[str, Any]]:
@@ -1056,6 +1073,7 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
             "portrait_url": c.get("portrait_url"), "thumbnail_url": c.get("thumbnail_url"),
             "profile_url": c.get("profile_url"),
             "gear": _json.loads(c["gear"]) if c.get("gear") else {},
+            "role": role_from_spec(c.get("spec") or p.get("spec"), c.get("class") or p.get("class"), p.get("role")),
             "best_boss": {"boss": bosses[-1]["encounter_name"], "pct": bosses[-1]["pct"]} if bosses else None,
             "worst_boss": {"boss": bosses[0]["encounter_name"], "pct": bosses[0]["pct"]} if len(bosses) > 1 else None,
         }

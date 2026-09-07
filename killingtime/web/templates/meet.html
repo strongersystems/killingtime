@@ -6,8 +6,8 @@
   <div><h1>{{ team_label }} <span class="muted">·</span> Meet the team</h1>
   <small>Everyone who raided {{ zone.name if zone else 'this tier' }}{% if difficulty %} at {{ DIFFICULTIES[difficulty] }}{% endif %}.
     Bios are written from their own attendance, parses, Mythic+ and raid history, so any slander is self-inflicted.
-    Hover a portrait (or scroll it into view on a phone) to flip through their five poses.
-    Each card carries the prompts that made them, built from their live transmog and weapons.</small></div>
+    Portraits are drawn from the transmog and weapons they are wearing right now; hover or tap one with a ▶ on it
+    to flip through their five poses.</small></div>
 </div>
 
 {% if not cards %}
@@ -27,7 +27,7 @@
         {% for f in p.frames %}
         <img class="portrait anim" data-src="{{ f }}" alt="" hidden>
         {% endfor %}
-        <span class="frame-badge" hidden>▶</span>
+        <button class="frame-badge" type="button" hidden aria-label="Play the animation">▶</button>
       </div>
       <div class="who">
         <h2>{% if p.profile_url %}<a href="{{ p.profile_url }}" target="_blank" rel="noopener">{{ p.player }}</a>{% else %}{{ p.player }}{% endif %}</h2>
@@ -83,54 +83,24 @@
     </details>
     {% endif %}
 
-    <details class="prompt">
-      <summary>Portrait prompts <span class="muted">· {{ p.portrait_prompts|length }} frames</span></summary>
-      <p class="muted hint">Frame 1 is the hero shot: standing at arms in their transmog, weapons drawn. Generate all five,
-        drop them in as <code>{{ p.frames[0] if p.frames else 'members/' ~ p.slug ~ '/1.webp' }}</code> … <code>5.webp</code>, and this card animates.</p>
-      {% for f in p.portrait_prompts %}
-      <div class="prompt-frame">
-        <div class="prompt-label"><b>{{ loop.index }}. {{ f.label }}</b><button class="btn secondary copy" type="button" data-label="Copy">Copy</button></div>
-        <textarea readonly rows="5" onclick="this.select()">{{ f.prompt }}</textarea>
-      </div>
-      {% endfor %}
-      <button class="btn secondary copy-all" type="button">Copy all five</button>
-    </details>
   </div>
   {% endfor %}
 </div>
-<p class="muted" style="margin-top:1rem">Portraits are Blizzard's own character renders, so they update when the player changes transmog.
-  The prompts name their real weapons and armour, which is what makes the generated picture look like them.</p>
+<p class="muted" style="margin-top:1rem">Raiders without a drawn portrait fall back to Blizzard's own character render,
+  which updates when they change transmog. This page is also public at <a href="/public">killingtime.fyi/team</a>.</p>
 {% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
-// Copy buttons: one per frame, plus "copy all".
-document.querySelectorAll(".prompt .copy").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const text = btn.closest(".prompt-frame").querySelector("textarea").value;
-    copy(btn, text, "Copy");
-  });
-});
-document.querySelectorAll(".prompt .copy-all").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const parts = [...btn.closest(".prompt").querySelectorAll(".prompt-frame")].map((f) =>
-      f.querySelector(".prompt-label b").textContent + "\n" + f.querySelector("textarea").value);
-    copy(btn, parts.join("\n\n"), "Copy all five");
-  });
-});
-function copy(btn, text, label) {
-  navigator.clipboard.writeText(text).then(() => {
-    btn.textContent = "Copied";
-    setTimeout(() => (btn.textContent = label), 1500);
-  }).catch(() => { btn.textContent = "Select it manually"; });
-}
-
 // Frame animation. Generated frames are optional: if they 404 the card keeps the Blizzard render.
+// Hover previews the loop; clicking the portrait (or the ▶ button) locks it on or off, which is the only way
+// to see it on a touch screen.
 const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 document.querySelectorAll(".portrait-stack").forEach((stack) => {
   const frames = [...stack.querySelectorAll(".anim")];
+  const badge = stack.querySelector(".frame-badge");
   if (!frames.length) return;
-  let loaded = 0, timer = null, i = 0;
+  let loaded = 0, timer = null, i = 0, locked = false;
   // The hero shot stands alone: if frame 1 exists it becomes the portrait even when the other four do not.
   frames.forEach((img, k) => {
     img.addEventListener("load", () => {
@@ -147,24 +117,36 @@ document.querySelectorAll(".portrait-stack").forEach((stack) => {
 
   function ready() {
     stack.classList.add("animated");
-    stack.querySelector(".frame-badge").hidden = false;
+    badge.hidden = false;
     show(0);
-    stack.addEventListener("mouseenter", play);
-    stack.addEventListener("focus", play);
-    stack.addEventListener("mouseleave", stop);
-    stack.addEventListener("blur", stop);
-    // On touch, play once as the card scrolls into view - the hover joke, without a mouse.
-    if (window.IntersectionObserver && !REDUCED) {
+    stack.addEventListener("mouseenter", () => play());
+    stack.addEventListener("mouseleave", () => { if (!locked) stop(); });
+    stack.addEventListener("focus", () => play());
+    stack.addEventListener("blur", () => { if (!locked) stop(); });
+    stack.addEventListener("click", toggle);
+    stack.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(e); }
+    });
+    // On a mouse, play once as the card scrolls into view - the hover joke, without having to find it.
+    if (window.IntersectionObserver && !REDUCED && window.matchMedia("(hover: hover)").matches) {
       const io = new IntersectionObserver((entries) => {
         entries.forEach((e) => {
           if (!e.isIntersecting) return;
           play();
-          setTimeout(stop, 3200);
+          setTimeout(() => { if (!locked) stop(); }, 3200);
           io.unobserve(stack);
         });
       }, { threshold: 0.6 });
       io.observe(stack);
     }
+  }
+  function toggle(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    locked = !locked;
+    if (locked) play(true); else stop();
+    badge.textContent = locked ? "❚❚" : "▶";
+    badge.setAttribute("aria-label", locked ? "Stop the animation" : "Play the animation");
   }
   function show(n) {
     i = ((n % frames.length) + frames.length) % frames.length;
@@ -172,7 +154,8 @@ document.querySelectorAll(".portrait-stack").forEach((stack) => {
     const base = stack.querySelector(".base");
     if (base) base.style.visibility = "hidden";
   }
-  function play() { if (REDUCED || timer) return; timer = setInterval(() => show(i + 1), 620); }
+  // A click plays even with reduced motion on: the reader asked for it.
+  function play(force) { if (timer || (REDUCED && !force)) return; timer = setInterval(() => show(i + 1), 620); }
   function stop() { clearInterval(timer); timer = null; show(0); }
 });
 </script>

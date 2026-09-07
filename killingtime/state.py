@@ -30,23 +30,26 @@ def _url(settings: Settings, path: str = "/_internal/db") -> str:
     return settings.kt_state_url.rstrip("/") + path
 
 
-def publish_page(settings: Settings, html: str, http: httpx.Client | None = None) -> bool:
-    """Upload the rendered public site so the Worker can serve it without waking the container."""
+def publish_page(settings: Settings, html: str, http: httpx.Client | None = None, name: str = "public") -> bool:
+    """Upload a rendered public page so the Worker can serve it without waking the container.
+
+    ``name`` selects the page: "public" is the front page, "team" the Meet the Team page."""
     if not configured(settings):
         return False
     client = http or httpx.Client(timeout=60)
+    path = "/_internal/public" if name == "public" else f"/_internal/public/{name}"
     try:
         resp = client.put(
-            _url(settings, "/_internal/public"), content=html.encode("utf-8"),
+            _url(settings, path), content=html.encode("utf-8"),
             headers={HEADER: settings.kt_state_secret, "Content-Type": "text/html; charset=utf-8"},
         )
     except httpx.HTTPError as exc:
-        log.warning("public page publish failed: %s", exc)
+        log.warning("%s page publish failed: %s", name, exc)
         return False
     if resp.status_code >= 300:
-        log.warning("public page publish failed: HTTP %s %s", resp.status_code, resp.text[:200])
+        log.warning("%s page publish failed: HTTP %s %s", name, resp.status_code, resp.text[:200])
         return False
-    log.info("published public page (%d bytes)", len(html))
+    log.info("published %s page (%d bytes)", name, len(html))
     return True
 
 

@@ -390,7 +390,8 @@ def test_meet_the_team_page(synced):
     for path in ("/t/guild/meet", "/t/ce-team/meet", "/t/6-hour-team/meet?d=4"):
         assert client.get(path).status_code == 200, path
     page = client.get("/t/guild/meet?d=4").text
-    assert "Meet the team" in page and "Tagrik" in page and "Portrait prompt" in page
+    assert "Meet the team" in page and "Tagrik" in page and "portrait-stack" in page
+    assert "Portrait prompt" not in page  # the prompts are a build-time tool, not something a reader wants
     assert "-inset.jpg" in page
     api = client.get("/api/meet/46?difficulty=4").json()
     assert any(c["player"] == "Tagrik" and c["portrait_prompt"] for c in api)
@@ -423,3 +424,23 @@ def test_boss_page(synced):
     assert client.get("/t/guild/boss/3203?tier=46&d=5").status_code == 200  # no pulls: still renders
     api = client.get("/api/boss/46/3202?difficulty=5").json()
     assert api["total_pulls"] == 4 and api["best_pct"] == 38.0
+
+
+def test_public_team_page(synced):
+    """Meet the Team is part of the public site, with its own page and a link from the front page."""
+    from killingtime.public import render_public_team_page, roster_cards
+
+    conn, *_, settings = synced
+    groups = roster_cards(conn, settings)
+    assert groups and all(g["members"] for g in groups)
+    names = [m["player"] for g in groups for m in g["members"]]
+    assert "Tagrik" in names and len(names) == len(set(names))  # nobody appears under two teams
+    m = next(m for g in groups for m in g["members"] if m["player"] == "Tagrik")
+    assert m["bio"] and m["race"] == "Orc" and "portrait_prompt" not in m  # prompts stay out of the public page
+    html = render_public_team_page(conn, settings)
+    assert "Meet the team" in html and "Tagrik" in html and "portrait_prompt" not in html
+
+    client = TestClient(create_app(settings, conn))
+    page = client.get("/public/team")
+    assert page.status_code == 200 and "Meet the team" in page.text
+    assert '/team' in client.get("/public").text  # the front page links to it

@@ -1,0 +1,118 @@
+{% extends "public_base.html" %}
+{% block title %}Meet the team · {{ settings.name }} · {{ settings.realm }} {{ settings.region }}{% endblock %}
+{% block description %}The raiders of {{ settings.name }} on {{ settings.realm }} {{ settings.region }}: who they are, what they play, and what the logs say about them.{% endblock %}
+{% block canonical %}/team{% endblock %}
+{% block styles %}
+    .roster { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+    .member { display: flex; flex-direction: column; gap: .75rem; }
+    .member-head { display: flex; gap: .9rem; align-items: flex-start; }
+    .shot { position: relative; width: 116px; aspect-ratio: 3 / 4; flex: none; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-2); }
+    .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+    .shot.render img { object-position: center 12%; }   /* Blizzard busts are framed tighter than the drawn art */
+    .shot.playable { cursor: pointer; }
+    .shot.playable:hover { border-color: var(--gold); }
+    .shot .initial { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: 2.2rem; font-weight: 800; color: var(--muted); }
+    .shot.empty .initial, .shot:not(:has(img)) .initial { display: flex; }
+    .shot .play { position: absolute; right: .25rem; bottom: .25rem; font-size: .6rem; line-height: 1.6; padding: 0 .4rem; border: 0; border-radius: 999px; background: rgba(232,176,74,.9); color: #1a1408; cursor: pointer; font-family: inherit; font-weight: 700; }
+    .member h3 { margin: 0; font-size: 1.15rem; }
+    .member .who { min-width: 0; }
+    .member .sub { color: var(--muted); font-size: .85rem; }
+    .tags { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .45rem; }
+    .member .bio p { margin: 0 0 .4rem; font-size: .9rem; color: var(--ink-2); }
+    .member .bio p:last-child { margin-bottom: 0; }
+    .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: .5rem .6rem; border-top: 1px solid var(--border); padding-top: .6rem; margin-top: auto; }
+    .numbers .label { display: block; font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .numbers b { font-size: 1rem; }
+    .kit { font-size: .82rem; color: var(--muted); margin: 0; }
+    .group-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; margin: 1.6rem 0 .8rem; }
+    .group-head h2 { margin: 0; color: var(--ink); font-size: 1.25rem; text-transform: none; letter-spacing: 0; }
+    .links a.active { border-color: var(--gold); color: var(--ink); }
+{% endblock %}
+{% block content %}
+  <section class="hero">
+    <h1>Meet the team</h1>
+    <div class="kicker">The raiders of <span>{{ settings.name }}</span>{% if current %} · {{ current.name }}{% endif %}</div>
+    <p>Everyone below actually raids. The bios are written from their own attendance and Warcraft Logs parses, so
+      any slander is self-inflicted; the portraits are drawn from the transmog and weapons they are wearing right now.
+      {% if groups|selectattr('members')|map(attribute='members')|map('selectattr', 'generated')|map('list')|map('length')|sum %}Hover or tap a portrait with a ▶ on it to see them move.{% endif %}</p>
+  </section>
+
+  {% if not groups %}
+  <section><div class="card"><p class="muted">The roster arrives with the next sync.</p></div></section>
+  {% else %}
+  {% for g in groups %}
+  <section>
+    <div class="group-head">
+      <h2>{{ g.team }}</h2>
+      <span class="muted">{{ g.members|length }} raider{{ 's' if g.members|length != 1 }}{% if current %} · {{ current.name }}{% endif %}{% if g.difficulty %} · {{ g.difficulty }}{% endif %}</span>
+    </div>
+    <div class="roster">
+      {% for m in g.members %}
+      <div class="card member">
+        <div class="member-head">
+          <div class="shot{{ ' playable' if m.frames|length > 1 }}{{ ' render' if not m.generated }}" data-frames='{{ m.frames|tojson }}' tabindex="{{ 0 if m.frames|length > 1 else -1 }}">
+            {% if m.portrait %}<img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"
+                 onerror="this.remove();this.closest('.shot').classList.add('empty');">{% endif %}
+            <span class="initial">{{ m.player[0]|upper }}</span>
+            {% if m.frames|length > 1 %}<button class="play" type="button" aria-label="Play the animation">▶</button>{% endif %}
+          </div>
+          <div class="who">
+            <h3>{% if m.profile_url %}<a href="{{ m.profile_url }}" target="_blank" rel="noopener">{{ m.player }}</a>{% else %}{{ m.player }}{% endif %}</h3>
+            <div class="sub">{{ [m.gender, m.race, m.spec, m.class]|select|join(' ') }}</div>
+            <div class="tags">
+              {% if m.role %}<span class="pill">{{ {'tanks': 'Tank', 'healers': 'Healer', 'dps': 'DPS'}.get(m.role, m.role) }}</span>{% endif %}
+              {% if m.item_level %}<span class="pill">{{ m.item_level }} ilvl</span>{% endif %}
+              {% if m.pct is not none %}<span class="pill">{{ m.pct|round(0)|int }}% attendance</span>{% endif %}
+              {% if m.mplus_score %}<span class="pill">{{ m.mplus_score }} M+</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="bio">{% for line in m.bio %}<p>{{ line }}</p>{% endfor %}</div>
+
+        {% if m.weapons %}<p class="kit">Carrying {{ m.weapons|join(' and ') }}.</p>{% endif %}
+        {% if m.alts %}<p class="kit">Also plays {{ m.alts|join(', ') }}.</p>{% endif %}
+
+        <div class="numbers">
+          <div><span class="label">Raids this tier</span><b>{{ m.raids }}</b></div>
+          <div><span class="label">Avg parse</span><b>{{ m.avg|round(0)|int if m.avg is not none else '—' }}</b></div>
+          <div><span class="label">Best parse</span><b>{{ m.best|round(0)|int if m.best is not none else '—' }}</b></div>
+          <div><span class="label">Career raids</span><b>{{ m.career_raids }}</b></div>
+          <div><span class="label">Tiers</span><b>{{ m.tiers }}</b></div>
+          {% if m.since %}<div><span class="label">With us since</span><b style="font-size:.85rem">{{ m.since }}</b></div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  {% endif %}
+
+<script>
+// Five frames per raider where they exist: hover previews the loop, a click (or the button) locks it on or off.
+(function () {
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.querySelectorAll(".shot.playable").forEach((shot) => {
+    let frames = [];
+    try { frames = JSON.parse(shot.dataset.frames || "[]"); } catch (e) { return; }
+    if (frames.length < 2) return;
+    const img = shot.querySelector("img"), btn = shot.querySelector(".play");
+    if (!img) return;
+    frames.slice(1).forEach((src) => { const p = new Image(); p.src = src; });   // warm the cache
+    let timer = null, i = 0, locked = false;
+    const show = (n) => { i = (n + frames.length) % frames.length; img.src = frames[i]; };
+    const play = (force) => { if (timer || (reduced && !force)) return; timer = setInterval(() => show(i + 1), 620); };
+    const stop = () => { clearInterval(timer); timer = null; show(0); };
+    shot.addEventListener("mouseenter", () => play());
+    shot.addEventListener("mouseleave", () => { if (!locked) stop(); });
+    shot.addEventListener("click", (e) => {
+      e.preventDefault();
+      locked = !locked;
+      if (locked) play(true); else stop();
+      if (btn) { btn.textContent = locked ? "❚❚" : "▶"; btn.setAttribute("aria-label", locked ? "Stop the animation" : "Play the animation"); }
+    });
+    shot.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); shot.click(); } });
+  });
+})();
+</script>
+{% endblock %}

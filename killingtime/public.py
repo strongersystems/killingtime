@@ -121,6 +121,77 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
     }
 
 
+def _frames_on_disk(settings: Settings, slug: str, count: int) -> list[str]:
+    """Only offer portrait frames that actually exist, so the public page never shows a broken image."""
+    url = settings.member_image_url
+    if not url.startswith("/static/"):
+        return []  # served from somewhere we cannot check; the page falls back to the Blizzard render
+    static = Path(__file__).parent / "web" / "static"
+    out = []
+    for n in range(1, count + 1):
+        rel = url.format(slug=slug, n=n)[len("/static/"):]
+        if (static / rel).exists():
+            out.append(url.format(slug=slug, n=n))
+        else:
+            break  # frames are only useful as a complete run from 1
+    return out
+
+
+def roster_cards(conn: sqlite3.Connection, settings: Settings) -> list[dict[str, Any]]:
+    """Meet the Team for the public site: one group per raid team, each with its raiders' cards.
+
+    Same numbers as the internal page, minus anything that is nobody else's business: no prompts, no per-boss
+    log links. A raider appears under the team their attendance puts them in."""
+    cur = metrics.current_tier(conn)
+    if not cur:
+        return []
+    zone_id = cur["id"]
+    ov = metrics.overview(conn)
+    teams = [t for t in settings.team_names if t in ov["teams"]] or ov["teams"]
+    groups = []
+    for team in [*teams, None] if teams else [None]:
+        diff = metrics.best_difficulty(conn, zone_id, team)
+        cards = metrics.meet_the_team(conn, zone_id, diff, team, min_raids=2, alts=settings.alts,
+                                      image_url=settings.member_image_url)
+        seen = {c["player"] for g in groups for c in g["members"]}
+        # The configured roster leads the group; everyone else who raids with that team follows, by attendance.
+        named = {metrics._slug(n): i for i, n in enumerate(settings.teams.get(team, []))} if team else {}
+        cards.sort(key=lambda c: (named.get(c["slug"], len(named)), -(c["pct"] or 0)))
+        members = []
+        for c in cards:
+            if c["player"] in seen:
+                continue  # already shown under their own team; the guild group is the leftovers
+            frames = _frames_on_disk(settings, c["slug"], len(c["frames"]))
+            members.append({
+                "player": c["player"], "slug": c["slug"], "team": team,
+                "race": c["race"], "gender": c["gender"], "class": c["class"], "spec": c["spec"], "role": c["role"],
+                "item_level": round(c["item_level"]) if c["item_level"] else None,
+                "portrait": frames[0] if frames else (c["portrait_url"] or c["thumbnail_url"]),
+                "frames": frames,
+                "generated": bool(frames),
+                "profile_url": c["profile_url"],
+                "weapons": c["weapons"],
+                "bio": c["bio"][:5],   # the public page wants a paragraph, not a dossier
+                "stats": c["stats"],
+                "pct": c["pct"], "raids": c["raids"], "avg": c["avg"], "best": c["best"],
+                "mplus_score": round(c["mplus_score"]) if c["mplus_score"] else None,
+                "tiers": (c["history"] or {}).get("tier_count") or 0,
+                "career_raids": (c["history"] or {}).get("total_raids") or 0,
+                "since": (c["history"] or {}).get("since"),
+                "alts": c["alts"],
+            })
+        if members:
+            groups.append({"team": team or "Also raiding with us", "difficulty": DIFFICULTIES.get(diff, ""),
+                           "is_team": bool(team), "members": members})
+    return groups
+
+
 def render_public_page(conn: sqlite3.Connection, settings: Settings) -> str:
     data = public_summary(conn, settings)
-    return _env.get_template("public.html").render(**data)
+    return _env.get_template("public.html").render(page="home", **data)
+
+
+def render_public_team_page(conn: sqlite3.Connection, settings: Settings) -> str:
+    """The public Meet the Team page (killingtime.fyi/team)."""
+    data = public_summary(conn, settings)
+    return _env.get_template("public_team.html").render(page="team", groups=roster_cards(conn, settings), **data)

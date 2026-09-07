@@ -78,18 +78,31 @@ def _parse_line(p: dict[str, Any]) -> str:
     ], p["player"], "parse")
 
 
+# Several variants per role: with fifty-odd raiders on one page, two would read like a form letter.
 ROLE_LINES = {
     "tanks": [
         "Professional wall. Takes the enormous hits so a mage can stand still and criticise the positioning.",
         "Job description: be hit by the largest thing in the room, on purpose, repeatedly, without comment.",
+        "Walks backwards for a living and has strong opinions about where everyone else is standing.",
+        "Holds the boss still. Gets thanked for it roughly once a tier, usually by accident.",
+        "The first one in and, on a good night, the last one alive to say so.",
+        "Spends the fight facing away from the raid, which is both a tanking requirement and a coping strategy.",
     ],
     "healers": [
         "Keeps the raid alive in spite of its life choices, then gets told the healing was low.",
         "Spends the fight watching twenty health bars and one very specific person who stands in things.",
+        "Quietly undoes everyone else's mistakes and has never once been thanked in a timely fashion.",
+        "Believes deeply that most deaths are preventable, and can name exactly whose fault each one was.",
+        "Green numbers, grey hair. The two are related.",
+        "The reason the pull lasted long enough for anyone to complain about their damage.",
     ],
     "dps": [
         "Presses buttons, produces numbers, blames the healers. The circle of raiding.",
         "Contributes damage, opinions about damage, and a running commentary on everyone else's damage.",
+        "Exists to make a number go up, and to make sure everybody hears about the number.",
+        "Fully committed to the damage meter, and only loosely committed to the mechanics around it.",
+        "Would do more damage if they didn't keep having to move, as they will explain at length.",
+        "Turns up, hits the boss, dies to something avoidable, links the meter anyway.",
     ],
 }
 
@@ -140,6 +153,9 @@ def _progress_line(p: dict[str, Any]) -> str:
     return _pick([
         f"Personal raid record for this tier reads {summary}, which they will happily talk you through.",
         f"Carries a {summary} on the armory, and has opinions about every one of those bosses.",
+        f"The armory says {summary}. They would like to add context to that.",
+        f"{summary} on the armory, every boss of it earned on a Wednesday night.",
+        f"Sitting at {summary} this tier and counting, loudly.",
     ], p["player"], "prog")
 
 
