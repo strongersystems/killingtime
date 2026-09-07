@@ -685,6 +685,60 @@ def parse_coverage(conn: sqlite3.Connection, zone_id: int) -> dict[str, int]:
     return {"reports": row["reports"] or 0, "synced": row["synced"] or 0, "parses": row["parses"] or 0}
 
 
+def roster(conn: sqlite3.Connection, zone_id: int, difficulty: int | None, team: str | None, include_pugs: bool = False) -> dict[str, Any]:
+    """One row per raider for a tier: attendance (all difficulties) merged with parses (selected difficulty)."""
+    att = attendance_summary(conn, zone_id, team)
+    perf = performance(conn, zone_id, difficulty, team, include_pugs=include_pugs)
+    by_player = {p["player"]: p for p in perf["players"]}
+    rows = []
+    seen = set()
+    for a in att["players"]:
+        p = by_player.get(a["player_name"], {})
+        seen.add(a["player_name"])
+        rows.append(
+            {
+                "player": a["player_name"], "class": p.get("class") or a["player_class"], "spec": p.get("spec"), "role": p.get("role"),
+                "raids": a["raids"], "pct": a["pct"], "kills": p.get("kills", 0), "avg": p.get("avg"), "median": p.get("median"),
+                "best": p.get("best"), "avg_bracket": p.get("avg_bracket"),
+            }
+        )
+    for p in perf["players"]:  # parsed on a kill but never in attendance (pugs, or attendance not synced yet)
+        if p["player"] not in seen:
+            rows.append({**p, "raids": 0, "pct": None})
+    rows.sort(key=lambda r: (-(r["pct"] or 0), -(r["avg"] or 0), r["player"]))
+    return {"players": rows, "total_raids": att["total_raids"], "perf": perf}
+
+
+def unattributed_reports(conn: sqlite3.Connection, zone_id: int) -> int:
+    """Reports in a zone that could not be assigned to any raid team (their pulls only show in the guild view)."""
+    return conn.execute(
+        """SELECT COUNT(*) AS c FROM reports r WHERE r.zone_id = ?
+           AND NOT EXISTS (SELECT 1 FROM report_teams t WHERE t.report_code = r.code)""",
+        (zone_id,),
+    ).fetchone()["c"]
+
+
+def team_cards(conn: sqlite3.Connection, teams: list[str]) -> list[dict[str, Any]]:
+    """For the team chooser: each team's current tier and best-difficulty progress, plus the whole guild."""
+    cards = []
+    for team in [*teams, None]:
+        cur = current_tier(conn, team)
+        card: dict[str, Any] = {"team": team, "tier": cur["name"] if cur else None, "zone_id": cur["id"] if cur else None, "lines": []}
+        if cur:
+            for d in RAID_DIFFS:
+                k = cur["kills"].get(d)
+                if k is not None:
+                    card["lines"].append({"difficulty": d, "name": DIFFICULTIES[d], "killed": k, "total": cur["bosses"]})
+            best = best_difficulty(conn, cur["id"], team)
+            s = tier_summary(conn, cur["id"], best, team)
+            card["best"] = {"difficulty": best, "name": DIFFICULTIES[best], "killed": s["killed"], "total": s["total_bosses"],
+                            "next_boss": s["next_boss"]["name"] if s["next_boss"] else None, "cleared": s["cleared"],
+                            "last_pull_date": s["last_pull_date"]}
+            card["reports"] = cur["reports"]
+        cards.append(card)
+    return cards
+
+
 # ------------------------------------------------------------------------------------------ overview
 def overview(conn: sqlite3.Connection, team: str | None = None) -> dict[str, Any]:
     """Compact snapshot used by the dashboard header and the Ask tool."""

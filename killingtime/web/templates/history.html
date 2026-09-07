@@ -1,23 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Tier comparison{% endblock %}
+{% block title %}History{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Tier over tier <span class="pill {{ DIFFICULTIES[difficulty]|lower }}">{{ DIFFICULTIES[difficulty] }}</span>{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1>
-  <small>How this tier's progression compares with earlier tiers, aligned by boss order and by days since our first pull.</small></div>
-  <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link('/tiers', difficulty=d, team=team) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
+  <div><h1>{{ team_label }} <span class="muted">·</span> Tier over tier <span class="pill {{ DIFFICULTIES[difficulty]|lower }}">{{ DIFFICULTIES[difficulty] }}</span></h1>
+  <small>Every tier {{ 'this team has' if team else 'we have' }} logs for, aligned by boss order and by days since the first pull.</small></div>
+  <span class="seg">{% for dd in (5, 4, 3) %}<a href="{{ link(request.url.path, d=dd) }}" class="{{ 'active' if dd == difficulty }}">{{ DIFFICULTIES[dd] }}</a>{% endfor %}</span>
+</div>
+
+<div class="card" style="margin-bottom:1rem">
+  <h2><span>All tiers</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Tier</th><th>Expansion</th><th>Mythic</th><th>Heroic</th><th>Normal</th><th>Raided</th><th class="num">Logs</th></tr></thead>
+    <tbody>
+    {% for t in tiers_all %}
+    <tr><td><a href="{{ link(base ~ '/', tier=t.id) }}"><b>{{ t.name }}</b></a></td><td class="muted">{{ t.expansion or '' }}</td>
+      {% for dd in (5, 4, 3) %}<td>{% set s = t.by_diff.get(dd) %}{% if s %}<span class="pill {{ DIFFICULTIES[dd]|lower }}">{{ s.killed }}/{{ s.total_bosses }}</span> <span class="muted">{% if s.cleared %}cleared {{ s.last_kill_date }}{% elif s.next_boss %}on {{ s.next_boss.name }}{% endif %}</span>{% else %}—{% endif %}</td>{% endfor %}
+      <td class="muted">{{ t.first_report_date }} → {{ t.last_report_date }}</td><td class="num">{{ t.reports }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
 </div>
 
 {% if not comparison %}
-<div class="card"><p>No {{ DIFFICULTIES[difficulty] }} pulls logged in any tier yet.</p></div>
+<div class="card"><p>No {{ DIFFICULTIES[difficulty] }} pulls logged in any tier.</p></div>
 {% else %}
 <div class="card" style="margin-bottom:1rem">
-  <h2>Summary</h2>
+  <h2><span>{{ DIFFICULTIES[difficulty] }} summary</span></h2>
   <div class="table-scroll">
   <table>
-    <thead><tr><th>Tier</th><th>Expansion</th><th>First pull</th><th class="num">Bosses</th><th class="num">Pulls</th><th class="num">Nights</th><th class="num">Hours</th><th class="num">Days to latest kill</th><th class="num">Pulls / boss killed</th></tr></thead>
+    <thead><tr><th>Tier</th><th>First pull</th><th class="num">Bosses</th><th class="num">Pulls</th><th class="num">Nights</th><th class="num">Hours</th><th class="num">Days to latest kill</th><th class="num">Pulls / boss killed</th></tr></thead>
     <tbody>
     {% for t in comparison %}
-    <tr><td><a href="{{ link('/', zone=t.zone_id, difficulty=difficulty, team=team) }}">{{ t.zone }}</a></td><td>{{ t.expansion or '' }}</td><td>{{ t.first_pull_date }}</td>
+    <tr><td><a href="{{ link(base ~ '/', tier=t.zone_id, d=difficulty) }}">{{ t.zone }}</a></td><td>{{ t.first_pull_date }}</td>
       <td class="num">{{ t.killed }}/{{ t.total_bosses }}</td><td class="num">{{ t.pulls|num }}</td><td class="num">{{ t.nights }}</td><td class="num">{{ t.hours }}</td>
       <td class="num">{{ t.days_to_latest_kill if t.days_to_latest_kill is not none else '—' }}</td>
       <td class="num">{{ (t.pulls / t.killed)|round(1) if t.killed else '—' }}</td></tr>
@@ -28,7 +44,7 @@
 </div>
 <div class="grid two" id="charts"></div>
 <div class="card" style="margin-top:1rem">
-  <h2>Pulls to first kill, by boss position</h2>
+  <h2><span>Pulls to first kill, by boss position</span></h2>
   <div class="table-scroll">
   <table>
     <thead><tr><th>Boss #</th>{% for t in comparison %}<th class="num">{{ t.zone }}</th>{% endfor %}</tr></thead>
@@ -53,16 +69,14 @@
   const tiers = {{ chart_data|safe }};
   if (!tiers.length) return;
   const root = document.getElementById("charts");
-  const shown = tiers.slice(0, 8);  // categorical cap
+  const shown = tiers.slice(0, 8);
   const maxB = Math.max(...shown.map((t) => t.total_bosses));
   const labels = Array.from({ length: maxB }, (_, i) => `Boss ${i + 1}`);
   const pick = (t, i, key) => (t.bosses[i] && (t.bosses[i].killed || key === "cum_pulls") ? t.bosses[i][key] : null);
-
   KT.mount(root, {
     title: "Cumulative pulls by boss order", type: "line",
     labels, series: shown.map((t, idx) => ({ name: t.zone, data: labels.map((_, i) => pick(t, i, "cum_pulls")), emphasis: idx === 0 })),
-    yTitle: "cumulative pulls", xTitle: "boss position in the raid",
-    note: "Lower is faster. The current tier is drawn thicker; only killed bosses (plus the boss in progress) are plotted.",
+    yTitle: "cumulative pulls", xTitle: "boss position in the raid", note: "Lower is faster. The current tier is drawn thicker.",
   });
   KT.mount(root, {
     title: "Days from first pull to each kill", type: "line",
@@ -71,13 +85,11 @@
   });
   KT.mount(root, {
     title: "Pulls to kill per boss", type: "bar",
-    labels, series: shown.map((t) => ({ name: t.zone, data: labels.map((_, i) => pick(t, i, "pulls_to_kill")) })),
-    yTitle: "pulls",
+    labels, series: shown.map((t) => ({ name: t.zone, data: labels.map((_, i) => pick(t, i, "pulls_to_kill")) })), yTitle: "pulls",
   });
   KT.mount(root, {
     title: "Raid nights per tier", type: "bar",
-    labels: shown.map((t) => t.zone), series: [{ name: "Raid nights", data: shown.map((t) => t.nights) }],
-    yTitle: "nights",
+    labels: shown.map((t) => t.zone), series: [{ name: "Raid nights", data: shown.map((t) => t.nights) }], yTitle: "nights",
   });
 })();
 </script>

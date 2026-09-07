@@ -151,24 +151,32 @@ def test_public_site(synced, tmp_path):
 def test_web_pages_with_teams(synced):
     conn, *_, settings = synced
     client = TestClient(create_app(settings, conn))
-    for path in ["/", "/?team=CE+Team", "/?team=6+Hour+Team&zone=46&difficulty=4", "/tiers?team=CE+Team", "/peers", "/peers?team=6+Hour+Team&difficulty=4",
-                 "/peers?raid=manaforge-omega", "/performance", "/performance?zone=46&difficulty=4&team=6+Hour+Team&pugs=1",
-                 "/nights?team=CE+Team", "/attendance?team=6+Hour+Team", "/status", "/public"]:
+    for path in ["/t/ce-team/", "/t/6-hour-team/?tier=46&d=4", "/t/ce-team/history", "/t/6-hour-team/peers?d=4",
+                 "/t/ce-team/peers?raid=manaforge-omega", "/t/6-hour-team/roster", "/t/6-hour-team/roster?tier=46&d=4&pugs=1",
+                 "/t/ce-team/nights", "/t/6-hour-team/realm", "/status", "/public"]:
         r = client.get(path)
         assert r.status_code == 200, path
-    home = client.get("/").text
-    assert "CE Team" in home and "6 Hour Team" in home and "Latest kills" in home
-    team_home = client.get("/?team=6+Hour+Team").text
+    # picking a team is remembered: / now goes straight to it
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/t/6-hour-team/"
+    team_home = client.get("/t/6-hour-team/").text
     assert "3<span class=\"muted\">/3</span>" in team_home  # heroic clear is the team's best difficulty
-    peers = client.get("/peers").text
+    assert "Peer median" in team_home and "Internet Diff" not in team_home  # peers folded into the boss table, group list on /peers
+    ce = client.get("/t/ce-team/?tier=46&d=5").text
+    assert "Entombed Sentinels" in ce and "in progress" in ce
+    guild = client.get("/t/guild/").text
+    assert "Whole-guild" in guild or "Whole guild" in guild
+    peers = client.get("/t/6-hour-team/peers?d=4").text
     assert "Guilds around our level" in peers and "Internet Diff" in peers
-    perf = client.get("/performance?zone=46&difficulty=4&team=6+Hour+Team").text
-    assert "Tagrik" in perf and "Puggy" not in perf
+    roster = client.get("/t/6-hour-team/roster?tier=46&d=4").text
+    assert "Tagrik" in roster and "Puggy" not in roster and "Attendance" in roster
+    assert "Puggy" in client.get("/t/6-hour-team/roster?tier=46&d=4&pugs=1").text
     api = client.get("/api/peers/the-venomous-abyss?difficulty=5").json()
     assert api["peer_count"] == 2
+    ros = client.get("/api/roster/46?difficulty=4&team=6+Hour+Team").json()
+    assert ros["total_raids"] == 1 and ros["players"][0]["pct"] == 100.0
     pub = client.get("/api/public").json()
     assert pub["current"]["name"] == "The Venomous Abyss"
-    assert client.get("/?team=Nope").status_code == 200  # unknown team falls back to the guild view
 
 
 def test_migration_adds_columns(tmp_path):

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% set context_bar = true %}
+{% block title %}Roster{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{{ team_label }} <span class="muted">·</span> Roster{% if zone %} <span class="muted">· {{ zone.name }}</span>{% endif %}</h1>
+  <small>Attendance across the tier and Warcraft Logs parses on {{ DIFFICULTIES[difficulty] if difficulty else 'all' }} kills (DPS for damage dealers and tanks, HPS for healers).
+    {% if coverage %}Parses fetched for {{ coverage.synced }}/{{ coverage.reports }} logs.{% endif %}</small></div>
+  <div class="filters">
+    <a class="pill" href="{{ link(request.url.path, tier=zone_id, d=difficulty, pugs=(none if pugs else 1)) }}">{{ 'Hide other realms' if pugs else 'Show other-realm players' }}</a>
+  </div>
+</div>
+
+{% if not data or not data.players %}
+<div class="card"><p>No attendance or parses for this selection yet.</p></div>
+{% else %}
+{% set perf = data.perf %}
+<div class="tiles">
+  <div class="tile"><div class="label">Logged raids</div><div class="value">{{ data.total_raids }}</div><div class="sub">in this tier</div></div>
+  <div class="tile"><div class="label">Raiders</div><div class="value">{{ data.players|length }}</div><div class="sub">{{ 'incl. other realms' if pugs else settings.guild_realm ~ ' only' }}</div></div>
+  {% if perf.parses %}
+  <div class="tile"><div class="label">Median parse</div><div class="value">{{ perf.median|round(0)|int }}<span class="muted">%</span></div><div class="sub">{{ perf.parses }} parses on {{ perf.kills }} {{ DIFFICULTIES[difficulty] if difficulty else '' }} kills</div></div>
+  {% if perf.players %}<div class="tile"><div class="label">Top average</div><div class="value small">{{ perf.players[0].player }}</div><div class="sub">{{ perf.players[0].avg }}% over {{ perf.players[0].kills }} kills</div></div>{% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2><span>Raiders</span></h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Player</th><th>Spec</th><th>Role</th><th class="num">Raids</th><th class="num">Attendance</th><th class="num">Kills parsed</th><th class="num">Avg parse</th><th class="num">Median</th><th class="num">Best</th><th class="num">Bracket</th></tr></thead>
+    <tbody>
+    {% for p in data.players %}
+    <tr><td><b>{{ p.player }}</b></td><td>{{ p.spec or '' }} {{ p.class or '' }}</td><td>{{ p.role or '' }}</td>
+      <td class="num">{{ p.raids }}</td><td class="num">{% if p.pct is not none %}{{ p.pct }}%{% else %}—{% endif %}</td>
+      <td class="num">{{ p.kills or '—' }}</td>
+      <td class="num">{% if p.avg is not none %}<span class="pill {{ 'good' if p.avg >= 75 else ('bad' if p.avg < 25) }}">{{ p.avg|round(0)|int }}</span>{% else %}—{% endif %}</td>
+      <td class="num">{{ p.median|pct0 }}</td><td class="num">{{ p.best|pct0 }}</td><td class="num">{{ p.avg_bracket|pct0 }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted">Attendance = raids attended / logged raids in the tier (all difficulties). Parse percentiles are Warcraft Logs rank percentiles for the player's spec (higher is better); bracket = within the same item-level bracket.</p>
+</div>
+
+<div class="grid two" id="charts" style="margin-top:1rem"></div>
+
+{% if perf.bosses %}
+<div class="card" style="margin-top:1rem">
+  <h2><span>Parses by boss</span></h2>
+  <table>
+    <thead><tr><th>#</th><th>Boss</th><th class="num">Kills</th><th class="num">Median</th><th class="num">Avg</th><th>Best parse</th></tr></thead>
+    <tbody>{% for b in perf.bosses %}<tr><td>{{ b.ord }}</td><td>{{ b.boss }}</td><td class="num">{{ b.kills }}</td><td class="num">{{ b.median|pct0 }}</td><td class="num">{{ b.avg|pct0 }}</td><td>{{ b.best_player }} <span class="muted">{{ b.best|pct0 }}%</span></td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if data and data.players %}
+<script>
+(function () {
+  const data = {{ chart_data|safe }};
+  const root = document.getElementById("charts");
+  const att = data.players.filter((p) => p.pct !== null).slice(0, 30);
+  if (att.length) {
+    KT.mount(root, { title: "Attendance %", type: "hbar", labels: att.map((p) => p.player), series: [{ name: "Attendance %", data: att.map((p) => p.pct) }], yTitle: "% of raids", yMax: 100 });
+  }
+  const parsed = data.players.filter((p) => p.avg !== null).sort((a, b) => b.avg - a.avg).slice(0, 30);
+  if (parsed.length) {
+    KT.mount(root, { title: "Average parse", type: "hbar", labels: parsed.map((p) => p.player), series: [{ name: "Avg percentile", data: parsed.map((p) => p.avg) }], yTitle: "percentile", yMax: 100 });
+  }
+  if (data.perf.nights.length > 1) {
+    KT.mount(root, { title: "Median parse per raid night", type: "line", labels: data.perf.nights.map((n) => n.date), series: [{ name: "Median percentile", data: data.perf.nights.map((n) => n.median) }], yTitle: "percentile", yMax: 100 });
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

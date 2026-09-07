@@ -1,9 +1,14 @@
-"""FastAPI web app: dashboard, tier comparison, peers, rivals, performance, attendance, raid nights and Ask."""
+"""FastAPI web app.
+
+Navigation is team-first: ``/`` asks "which team?" (remembered in a cookie), then everything lives under
+``/t/<team>/`` - Progress (the current tier by default, with tier/difficulty switching), Roster, Nights, History,
+Peers and Realm. ``guild`` is the whole-guild view. Ask and Status are guild-wide utilities."""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -24,6 +29,12 @@ from ..db import DIFFICULTIES, connect
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
+GUILD = "guild"
+TEAM_COOKIE = "kt_team"
+
+
+def slugify(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "team"
 
 
 class SyncManager:
@@ -98,104 +109,183 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.filters["date"] = lambda ms: metrics.ms_to_date(ms) or "-"
     templates.env.filters["num"] = lambda v, d=0: ("-" if v is None else (f"{v:,.{d}f}"))
+    templates.env.filters["pct0"] = lambda v: ("—" if v is None else f"{round(v)}")
     templates.env.globals["DIFFICULTIES"] = DIFFICULTIES
     templates.env.globals["version"] = __version__
     db_lock = threading.Lock()
 
-    def team_of(request: Request) -> str | None:
-        """The selected raid team (``?team=``), validated against configured/seen teams."""
-        raw = request.query_params.get("team")
-        if not raw:
-            return None
-        known = set(settings.team_names) | set(metrics.teams_seen(conn))
-        return raw if raw in known else None
-
-    def ctx(request: Request, **extra: Any) -> dict[str, Any]:
-        team = team_of(request)
-        with db_lock:
-            ov = metrics.overview(conn, team)
-        teams = [t for t in settings.team_names if t in ov["teams"]] or ov["teams"]
-        return {
-            "request": request,
-            "settings": settings,
-            "overview": ov,
-            "team": team,
-            "teams": teams,
-            "tq": f"&team={team}" if team else "",  # append to links that carry other params
-            "ask_enabled": settings.ask_configured,
-            "sync_running": app.state.sync_manager.running,
-            **extra,
-        }
-
     def link(path: str, **params: Any) -> str:
-        q = {k: v for k, v in params.items() if v not in (None, "")}
+        q = {k: v for k, v in params.items() if v not in (None, "", False)}
         return f"{path}?{urlencode(q)}" if q else path
 
     templates.env.globals["link"] = link
 
-    def parse_diff(raw: str | None, zone_id: int | None, team: str | None) -> int:
-        if raw and raw.isdigit() and int(raw) in DIFFICULTIES:
-            return int(raw)
-        return metrics.best_difficulty(conn, zone_id, team) if zone_id else 5
+    # ------------------------------------------------------------------ teams
+    def known_teams() -> list[str]:
+        seen = metrics.teams_seen(conn)
+        return [t for t in settings.team_names if t in seen] or seen
 
+    def team_from_slug(slug: str) -> str | None:
+        """Team name for a URL slug; ``guild`` -> None (whole guild). Unknown slugs raise 404."""
+        if slug == GUILD:
+            return None
+        for t in known_teams():
+            if slugify(t) == slug:
+                return t
+        raise HTTPException(status_code=404, detail="Unknown team")
+
+    def team_slug(team: str | None) -> str:
+        return GUILD if team is None else slugify(team)
+
+    def remembered_slug(request: Request) -> str | None:
+        slug = request.cookies.get(TEAM_COOKIE)
+        if not slug:
+            return None
+        if slug == GUILD or any(slugify(t) == slug for t in known_teams()):
+            return slug
+        return None
+
+    def with_cookie(response, slug: str):
+        response.set_cookie(TEAM_COOKIE, slug, max_age=365 * 86400, samesite="lax")
+        return response
+
+    # ------------------------------------------------------------------ context
     def pick_zone(tiers: list[dict], zone: int | None) -> int | None:
         if zone and any(t["id"] == zone for t in tiers):
             return zone
         return tiers[0]["id"] if tiers else None
 
-    # ------------------------------------------------------------------ pages
+    def pick_diff(raw: int | None, zone_id: int | None, team: str | None) -> int:
+        if raw in (3, 4, 5):
+            return raw
+        return metrics.best_difficulty(conn, zone_id, team) if zone_id else 5
+
+    def ctx(request: Request, slug: str | None = None, *, tier: int | None = None, d: int | None = None, **extra: Any) -> dict[str, Any]:
+        team = team_from_slug(slug) if slug else None
+        with db_lock:
+            ov = metrics.overview(conn, team)
+            teams = known_teams()
+            zone_id = pick_zone(ov["tiers"], tier) if slug else None
+            diff = pick_diff(d, zone_id, team) if slug else None
+            unattributed = metrics.unattributed_reports(conn, zone_id) if (zone_id and team) else 0
+        tslug = team_slug(team) if slug else None
+        return {
+            "request": request,
+            "settings": settings,
+            "overview": ov,
+            "team": team,
+            "team_slug": tslug,
+            "team_label": team or ("Whole guild" if slug else None),
+            "teams": [{"name": t, "slug": slugify(t)} for t in teams],
+            "base": f"/t/{tslug}" if tslug else "",
+            "zone_id": zone_id,
+            "zone": next((t for t in ov["tiers"] if t["id"] == zone_id), None),
+            "difficulty": diff,
+            "unattributed": unattributed,
+            "ask_enabled": settings.ask_configured,
+            "sync_running": app.state.sync_manager.running,
+            **extra,
+        }
+
+    # ------------------------------------------------------------------ home / chooser
     @app.get("/", response_class=HTMLResponse)
-    def dashboard(request: Request, zone: int | None = None, difficulty: str | None = None):
-        c = ctx(request)
-        team = c["team"]
-        tiers = c["overview"]["tiers"]
-        if not tiers:
-            return templates.TemplateResponse(request, "empty.html", c)
-        zone_id = pick_zone(tiers, zone)
-        diff = parse_diff(difficulty, zone_id, team)
+    def home(request: Request):
+        with db_lock:
+            has_data = conn.execute("SELECT COUNT(*) AS c FROM reports").fetchone()["c"] > 0
+        if not has_data:
+            return templates.TemplateResponse(request, "empty.html", ctx(request))
+        slug = remembered_slug(request)
+        if slug:
+            return RedirectResponse(f"/t/{slug}/", status_code=302)
+        return teams_page(request)
+
+    @app.get("/teams", response_class=HTMLResponse)
+    def teams_page(request: Request):
+        with db_lock:
+            cards = metrics.team_cards(conn, known_teams())
+        for c in cards:
+            c["slug"] = team_slug(c["team"])
+        return templates.TemplateResponse(request, "teams.html", ctx(request, cards=cards))
+
+    # ------------------------------------------------------------------ team pages
+    @app.get("/t/{slug}/", response_class=HTMLResponse)
+    def progress_page(request: Request, slug: str, tier: int | None = None, d: int | None = None):
+        c = ctx(request, slug, tier=tier, d=d)
+        team, zone_id, diff = c["team"], c["zone_id"], c["difficulty"]
+        if not zone_id:
+            return with_cookie(templates.TemplateResponse(request, "progress.html", {**c, "summary": None}), slug)
         with db_lock:
             summary = metrics.tier_summary(conn, zone_id, diff, team)
             timeline = metrics.progress_timeline(conn, zone_id, diff, team)
-            nights = metrics.raid_nights(conn, zone_id, limit=12, team=team)
-            other_diffs = {
-                d: metrics.tier_summary(conn, zone_id, d, team)["killed"] for d in (3, 4, 5) if d != diff
-            }
-            rankings = [dict(r) for r in conn.execute(
-                "SELECT * FROM wcl_zone_rankings WHERE zone_id = ? ORDER BY metric", (zone_id,)).fetchall()]
-            team_cards = metrics.team_progress(conn, zone_id, c["teams"]) if (c["teams"] and not team) else []
-            latest = metrics.latest_kills(conn, limit=8, team=team, zone_id=zone_id)
+            nights = metrics.raid_nights(conn, zone_id, limit=10, team=team)
+            other = {dd: metrics.tier_summary(conn, zone_id, dd, team) for dd in (5, 4, 3)}
+            latest = metrics.latest_kills(conn, limit=6, team=team, zone_id=zone_id)
             perf = metrics.performance(conn, zone_id, diff, team)
-        return templates.TemplateResponse(
-            request, "dashboard.html",
-            {**c, "zone_id": zone_id, "difficulty": diff, "summary": summary, "timeline": timeline,
-             "nights": nights, "other_diffs": other_diffs, "rankings": rankings, "team_cards": team_cards,
-             "latest": latest, "perf": perf,
-             "chart_data": json.dumps({"summary": summary, "timeline": timeline, "nights": nights, "teams": team_cards}, default=str)},
+            rio = next((r for r in c["overview"]["raiderio"] if r["raid_slug"] == c["zone"]["rio_raid_slug"]), None)
+            wcl_rank = conn.execute(
+                "SELECT * FROM wcl_zone_rankings WHERE zone_id = ? AND metric = 'progress'", (zone_id,)).fetchone()
+            peers = metrics.peer_comparison(conn, c["zone"]["rio_raid_slug"], diff, team) if c["zone"]["rio_raid_slug"] else None
+        peer_by_slug = {b["slug"]: b for b in peers["bosses"]} if peers else {}
+        for b in summary["bosses"]:
+            b["peer"] = peer_by_slug.get(b["rio_encounter_slug"])
+        difficulties = [
+            {"code": dd, "name": DIFFICULTIES[dd], "killed": s["killed"], "total": s["total_bosses"], "pulls": s["pulls"],
+             "cleared": s["cleared"], "active": dd == diff}
+            for dd, s in other.items() if s["pulls"] > 0 or dd == diff
+        ]
+        resp = templates.TemplateResponse(
+            request, "progress.html",
+            {**c, "summary": summary, "timeline": timeline, "nights": nights, "difficulties": difficulties, "latest": latest,
+             "perf": perf, "rio": rio, "wcl_rank": dict(wcl_rank) if wcl_rank else None, "peers": peers,
+             "chart_data": json.dumps({"summary": summary, "timeline": timeline, "nights": nights,
+                                       "peers": {"peer_count": peers["peer_count"]} if peers else None}, default=str)},
         )
+        return with_cookie(resp, slug)
 
-    @app.get("/tiers", response_class=HTMLResponse)
-    def tiers_page(request: Request, difficulty: str | None = None):
-        c = ctx(request)
+    @app.get("/t/{slug}/roster", response_class=HTMLResponse)
+    def roster_page(request: Request, slug: str, tier: int | None = None, d: int | None = None, pugs: int = 0):
+        c = ctx(request, slug, tier=tier, d=d)
+        with db_lock:
+            data = metrics.roster(conn, c["zone_id"], c["difficulty"], c["team"], include_pugs=bool(pugs)) if c["zone_id"] else None
+            coverage = metrics.parse_coverage(conn, c["zone_id"]) if c["zone_id"] else None
+        return with_cookie(templates.TemplateResponse(
+            request, "roster.html",
+            {**c, "data": data, "coverage": coverage, "pugs": bool(pugs), "chart_data": json.dumps(data, default=str)}), slug)
+
+    @app.get("/t/{slug}/nights", response_class=HTMLResponse)
+    def nights_page(request: Request, slug: str, tier: int | None = None, d: int | None = None):
+        c = ctx(request, slug, tier=tier, d=d)
+        with db_lock:
+            nights = metrics.raid_nights(conn, c["zone_id"], limit=200, team=c["team"]) if c["zone_id"] else []
+        return with_cookie(templates.TemplateResponse(
+            request, "nights.html", {**c, "nights": nights, "chart_data": json.dumps(nights, default=str)}), slug)
+
+    @app.get("/t/{slug}/history", response_class=HTMLResponse)
+    def history_page(request: Request, slug: str, d: int | None = None):
+        c = ctx(request, slug, d=d)
         team = c["team"]
-        diff = int(difficulty) if difficulty and difficulty.isdigit() and int(difficulty) in DIFFICULTIES else 5
+        diff = d if d in (3, 4, 5) else 5
         with db_lock:
             comparison = metrics.tier_comparison(conn, diff, team)
-            if not comparison and diff == 5:
+            if not comparison and diff == 5 and d is None:
                 diff = 4
                 comparison = metrics.tier_comparison(conn, diff, team)
-        return templates.TemplateResponse(
-            request, "tiers.html",
-            {**c, "difficulty": diff, "comparison": comparison, "chart_data": json.dumps(comparison, default=str)},
-        )
+            tiers_all = [{**t, "by_diff": {dd: metrics.tier_summary(conn, t["id"], dd, team) for dd in (5, 4, 3) if dd in t["kills"]}}
+                         for t in c["overview"]["tiers"]]
+        return with_cookie(templates.TemplateResponse(
+            request, "history.html",
+            {**c, "difficulty": diff, "comparison": comparison, "tiers_all": tiers_all, "chart_data": json.dumps(comparison, default=str)}), slug)
 
-    def raid_selection(raid: str | None, difficulty: str | None, team: str | None) -> tuple[list[dict], dict | None, int]:
+    def raid_selection(raid: str | None, d: int | None, team: str | None, zone_id: int | None) -> tuple[list[dict], dict | None, int]:
         with db_lock:
             raids = metrics.rio_raids_for_zone(conn)
         if not raids:
             return [], None, 5
+        if not raid and zone_id:
+            raid = next((r["slug"] for r in raids if r.get("zone_id") == zone_id), None)
         raid_slug = raid if raid and any(r["slug"] == raid for r in raids) else raids[0]["slug"]
         chosen = next(r for r in raids if r["slug"] == raid_slug)
-        diff = int(difficulty) if difficulty and difficulty.isdigit() and int(difficulty) in (3, 4, 5) else None
+        diff = d if d in (3, 4, 5) else None
         if diff is None:
             with db_lock:
                 if chosen.get("zone_id"):
@@ -207,81 +297,50 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
                     diff = int(row["d"]) if row and row["d"] else 5
         return raids, chosen, diff
 
-    @app.get("/peers", response_class=HTMLResponse)
-    def peers_page(request: Request, raid: str | None = None, difficulty: str | None = None):
-        c = ctx(request)
-        team = c["team"]
-        raids, chosen, diff = raid_selection(raid, difficulty, team)
+    @app.get("/t/{slug}/peers", response_class=HTMLResponse)
+    def peers_page(request: Request, slug: str, raid: str | None = None, tier: int | None = None, d: int | None = None):
+        c = ctx(request, slug, tier=tier, d=d)
+        raids, chosen, diff = raid_selection(raid, d, c["team"], c["zone_id"])
         if not chosen:
-            return templates.TemplateResponse(request, "peers.html", {**c, "raids": [], "raid": None})
+            return with_cookie(templates.TemplateResponse(request, "peers.html", {**c, "raids": [], "raid": None}), slug)
         with db_lock:
-            cmp = metrics.peer_comparison(conn, chosen["slug"], diff, team)
-            # The previous raid for the "this and last tier" view, if we have one.
+            cmp = metrics.peer_comparison(conn, chosen["slug"], diff, c["team"])
             others = [r for r in raids if r["slug"] != chosen["slug"] and r["bosses"] > 1]
-            prev = metrics.peer_comparison(conn, others[0]["slug"], diff, team) if others else None
-            prev_raid = others[0] if others else None
-        return templates.TemplateResponse(
+            prev = metrics.peer_comparison(conn, others[0]["slug"], diff, c["team"]) if others else None
+        return with_cookie(templates.TemplateResponse(
             request, "peers.html",
-            {**c, "raids": raids, "raid": chosen, "difficulty": diff, "cmp": cmp, "prev": prev, "prev_raid": prev_raid,
-             "chart_data": json.dumps({"cmp": cmp, "prev": prev, "prev_raid": prev_raid}, default=str)},
-        )
+            {**c, "raids": raids, "raid": chosen, "difficulty": diff, "cmp": cmp, "prev": prev, "prev_raid": others[0] if others else None,
+             "chart_data": json.dumps({"cmp": cmp, "prev": prev, "prev_raid": others[0] if others else None}, default=str)}), slug)
 
-    @app.get("/rivals", response_class=HTMLResponse)
-    def rivals_page(request: Request, raid: str | None = None, difficulty: str | None = None):
-        c = ctx(request)
-        raids, chosen, diff = raid_selection(raid, difficulty, None)
+    @app.get("/t/{slug}/realm", response_class=HTMLResponse)
+    def realm_page(request: Request, slug: str, raid: str | None = None, tier: int | None = None, d: int | None = None):
+        c = ctx(request, slug, tier=tier, d=d)
+        raids, chosen, diff = raid_selection(raid, d, None, c["zone_id"])
         if not chosen:
-            return templates.TemplateResponse(request, "rivals.html", {**c, "raids": [], "raid": None})
+            return with_cookie(templates.TemplateResponse(request, "rivals.html", {**c, "raids": [], "raid": None}), slug)
         with db_lock:
             comparison = metrics.rival_comparison(conn, chosen["slug"], diff)
             standings = metrics.realm_standings(conn, chosen["slug"], diff, limit=100)
             race = metrics.race_timeline(conn, chosen["slug"], diff)
-        return templates.TemplateResponse(
+        return with_cookie(templates.TemplateResponse(
             request, "rivals.html",
-            {**c, "raids": raids, "raid": chosen, "difficulty": diff,
-             "comparison": comparison, "standings": standings,
-             "chart_data": json.dumps({"comparison": comparison, "race": race}, default=str)},
-        )
+            {**c, "raids": raids, "raid": chosen, "difficulty": diff, "comparison": comparison, "standings": standings,
+             "chart_data": json.dumps({"comparison": comparison, "race": race}, default=str)}), slug)
 
-    @app.get("/performance", response_class=HTMLResponse)
-    def performance_page(request: Request, zone: int | None = None, difficulty: str | None = None, pugs: int = 0):
-        c = ctx(request)
-        team = c["team"]
-        tiers = c["overview"]["tiers"]
-        zone_id = pick_zone(tiers, zone)
-        diff = int(difficulty) if difficulty and difficulty.isdigit() and int(difficulty) in (3, 4, 5) else None
-        with db_lock:
-            perf = metrics.performance(conn, zone_id, diff, team, include_pugs=bool(pugs)) if zone_id else None
-            coverage = metrics.parse_coverage(conn, zone_id) if zone_id else None
-        return templates.TemplateResponse(
-            request, "performance.html",
-            {**c, "zone_id": zone_id, "difficulty": diff, "perf": perf, "coverage": coverage, "pugs": bool(pugs),
-             "chart_data": json.dumps(perf, default=str)},
-        )
-
-    @app.get("/attendance", response_class=HTMLResponse)
-    def attendance_page(request: Request, zone: int | None = None):
-        c = ctx(request)
-        tiers = c["overview"]["tiers"]
-        zone_id = pick_zone(tiers, zone)
-        with db_lock:
-            data = metrics.attendance_summary(conn, zone_id, c["team"]) if zone_id else {"total_raids": 0, "players": []}
-        return templates.TemplateResponse(
-            request, "attendance.html",
-            {**c, "zone_id": zone_id, "data": data, "chart_data": json.dumps(data, default=str)},
-        )
-
-    @app.get("/nights", response_class=HTMLResponse)
-    def nights_page(request: Request, zone: int | None = None):
-        c = ctx(request)
-        tiers = c["overview"]["tiers"]
-        zone_id = pick_zone(tiers, zone)
-        with db_lock:
-            nights = metrics.raid_nights(conn, zone_id, limit=200, team=c["team"]) if zone_id else []
-        return templates.TemplateResponse(
-            request, "nights.html",
-            {**c, "zone_id": zone_id, "nights": nights, "chart_data": json.dumps(nights, default=str)},
-        )
+    # Old flat URLs keep working: send them to the remembered team (or the whole guild).
+    LEGACY = {"/tiers": "history", "/peers": "peers", "/rivals": "realm", "/performance": "roster", "/attendance": "roster", "/nights": "nights"}
+    for old, new in LEGACY.items():
+        def _redirect(request: Request, _new: str = new):
+            slug = remembered_slug(request) or GUILD
+            q = {k: v for k, v in request.query_params.items() if k not in ("team", "zone", "difficulty")}
+            if request.query_params.get("team") in known_teams():
+                slug = slugify(request.query_params["team"])
+            if request.query_params.get("zone"):
+                q["tier"] = request.query_params["zone"]
+            if request.query_params.get("difficulty"):
+                q["d"] = request.query_params["difficulty"]
+            return RedirectResponse(link(f"/t/{slug}/{_new}", **q), status_code=302)
+        app.get(old, include_in_schema=False)(_redirect)
 
     @app.get("/ask", response_class=HTMLResponse)
     def ask_page(request: Request):
@@ -301,6 +360,7 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
                 """SELECT z.id, z.name, z.rio_raid_slug, x.name AS expansion,
                           (SELECT COUNT(*) FROM reports r WHERE r.zone_id = z.id) AS reports,
                           (SELECT COUNT(*) FROM reports r WHERE r.zone_id = z.id AND r.rankings_synced_at IS NOT NULL) AS parsed_reports,
+                          (SELECT COUNT(*) FROM reports r JOIN report_teams t ON t.report_code = r.code WHERE r.zone_id = z.id) AS attributed,
                           (SELECT COUNT(*) FROM encounters e WHERE e.zone_id = z.id) AS bosses,
                           (SELECT COUNT(*) FROM encounters e WHERE e.zone_id = z.id AND e.rio_encounter_slug IS NOT NULL) AS mapped_bosses
                    FROM zones z LEFT JOIN expansions x ON x.id = z.expansion_id ORDER BY z.id DESC""").fetchall()]
@@ -374,6 +434,11 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
     def api_performance(zone_id: int, difficulty: int | None = None, team: str | None = None, pugs: bool = False):
         with db_lock:
             return as_json(metrics.performance(conn, zone_id, difficulty, team, include_pugs=pugs))
+
+    @app.get("/api/roster/{zone_id}")
+    def api_roster(zone_id: int, difficulty: int | None = None, team: str | None = None, pugs: bool = False):
+        with db_lock:
+            return as_json(metrics.roster(conn, zone_id, difficulty, team, include_pugs=pugs))
 
     @app.post("/api/ask")
     def api_ask(body: AskRequest):

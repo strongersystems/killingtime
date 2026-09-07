@@ -1,18 +1,16 @@
 {% extends "base.html" %}
+{% set context_bar = true %}
 {% block title %}Raid nights{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Raid nights{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1><small>One row per date and difficulty, from our Warcraft Logs pulls.</small></div>
-  <form method="get" action="/nights" class="filters">
-    <select class="control" name="zone" onchange="this.form.submit()">
-      {% for t in overview.tiers %}<option value="{{ t.id }}" {{ 'selected' if t.id == zone_id }}>{{ t.name }}</option>{% endfor %}
-    </select>
-    {% if team %}<input type="hidden" name="team" value="{{ team }}">{% endif %}
-  </form>
+  <div><h1>{{ team_label }} <span class="muted">·</span> Raid nights{% if zone %} <span class="muted">· {{ zone.name }}</span>{% endif %}</h1><small>One row per date and difficulty, from {{ 'this team\'s' if team else 'our' }} Warcraft Logs pulls.</small></div>
 </div>
+{% if not nights %}
+<div class="card"><p>No raid nights logged for this selection.</p></div>
+{% else %}
 <div class="grid two" id="charts"></div>
 <div class="card" style="margin-top:1rem">
-  <h2>All nights</h2>
+  <h2><span>All nights</span></h2>
   <div class="table-scroll">
   <table>
     <thead><tr><th>Date</th><th>Difficulty</th><th class="num">Pulls</th><th class="num">Kills</th><th class="num">Wipes</th><th class="num">Bosses</th><th class="num">Hours in combat</th><th class="num">Avg ilvl</th><th>Killed</th></tr></thead>
@@ -26,6 +24,7 @@
   </table>
   </div>
 </div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
@@ -33,11 +32,12 @@
   const nights = {{ chart_data|safe }};
   if (!nights.length) return;
   const root = document.getElementById("charts");
-  const diffs = [...new Set(nights.map((n) => n.difficulty))].sort((a, b) => b - a);
+  const diff = {{ difficulty or 'null' }};
   const names = { 5: "Mythic", 4: "Heroic", 3: "Normal", 1: "LFR" };
-  const top = nights.filter((n) => n.difficulty === diffs[0]).slice().reverse().slice(-40);
+  const top = nights.filter((n) => n.difficulty === diff).slice().reverse().slice(-40);
+  if (!top.length) return;
   KT.mount(root, {
-    title: `Pulls per night (${names[diffs[0]] || diffs[0]})`, type: "stacked", labels: top.map((n) => n.pull_date),
+    title: `Pulls per night (${names[diff] || diff})`, type: "stacked", labels: top.map((n) => n.pull_date),
     series: [{ name: "Kills", data: top.map((n) => n.kills) }, { name: "Wipes", data: top.map((n) => n.wipes) }], yTitle: "pulls",
   });
   KT.mount(root, {

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Which team?{% endblock %}
+{% block content %}
+<div class="chooser">
+  <h1>Which team?</h1>
+  <p class="muted">Pick a raid team to see its progress, roster and how it compares. Your choice is remembered on this device.</p>
+  <div class="team-cards">
+    {% for c in cards %}
+    <a class="team-card {{ 'guild' if not c.team }}" href="/t/{{ c.slug }}/">
+      <div class="name">{{ c.team or 'Whole guild' }}</div>
+      {% if c.tier %}
+      <div class="tier">{{ c.tier }}</div>
+      <div class="lines">
+        {% for l in c.lines %}<span class="pill {{ l.name|lower }}">{{ l.name }} {{ l.killed }}/{{ l.total }}</span>{% endfor %}
+      </div>
+      {% if c.best %}<div class="sub">{% if c.best.cleared %}{{ c.best.name }} cleared{% elif c.best.next_boss %}{{ c.best.name }}: working on {{ c.best.next_boss }}{% endif %}{% if c.best.last_pull_date %} · last raid {{ c.best.last_pull_date }}{% endif %}</div>{% endif %}
+      {% else %}
+      <div class="sub muted">No logs attributed yet.</div>
+      {% endif %}
+      <div class="go">Open →</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% if not teams %}
+  <p class="muted">No raid teams are configured. Set <code>RAID_TEAMS</code> (see docs/SETUP.md) to split the guild's logs by team.</p>
+  {% endif %}
+</div>
+{% endblock %}

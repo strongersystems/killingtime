@@ -6,16 +6,16 @@
 <div class="card"><p>No Raider.IO standings yet. Run a sync (Raider.IO needs no credentials) and make sure <code>RIVAL_GUILDS</code> in <code>.env</code> lists the guilds you care about.</p></div>
 {% else %}
 <div class="page-head">
-  <div><h1>{{ raid.name }} <span class="pill {{ comparison.difficulty_name|lower }}">{{ comparison.difficulty_name }}</span></h1>
-  <small>Realm standings from Raider.IO for {{ settings.guild_realm }} ({{ settings.guild_region|upper }}), plus configured rivals.</small></div>
+  <div><h1>Rivals &amp; realm <span class="muted">·</span> {{ raid.name }} <span class="pill {{ comparison.difficulty_name|lower }}">{{ comparison.difficulty_name }}</span></h1>
+  <small>Realm standings from Raider.IO for {{ settings.guild_realm }} ({{ settings.guild_region|upper }}), plus configured rivals. Raider.IO tracks the guild as a whole, so this page is the same for every team.</small></div>
   <div class="filters">
-    <form method="get" action="/rivals">
+    <form method="get" action="{{ request.url.path }}">
       <select class="control" name="raid" onchange="this.form.submit()">
         {% for r in raids %}<option value="{{ r.slug }}" {{ 'selected' if r.slug == raid.slug }}>{{ r.name }}</option>{% endfor %}
       </select>
-      <input type="hidden" name="difficulty" value="{{ difficulty }}">
+      <input type="hidden" name="d" value="{{ difficulty }}">
     </form>
-    <span class="seg">{% for d in (5, 4, 3) %}<a href="/rivals?raid={{ raid.slug }}&difficulty={{ d }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
+    <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link(request.url.path, raid=raid.slug, d=d) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
   </div>
 </div>
 

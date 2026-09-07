@@ -157,10 +157,11 @@ kt serve
 
 Open http://127.0.0.1:8000. Pages:
 
-- **Dashboard** – pick the tier and difficulty at the top right.
-- **Tiers** – comparison across every tier you have logs for.
-- **Rivals & Realm** – choose the raid and difficulty; Killing Time is highlighted, rivals tinted.
-- **Raid nights / Attendance** – per-night and per-player tables with charts.
+- **Which team?** – the first screen (remembered on the device); "whole guild" is also an option.
+- **Progress** – the team's current tier; switch tier and difficulty in the bar under the header. Peer numbers sit in
+  the boss table.
+- **Roster** – attendance and parses per raider. **Nights** – per-night pulls. **History** – tier over tier.
+- **Peers** – guilds at our level in detail. **Realm** – rivals and realm standings (guild-wide, from Raider.IO).
 - **Ask ✦** – the question box. Every chart has a *Table* toggle.
 - **Status** – sync log, zone mapping, Warcraft Logs points, and *Sync now* / *Full re-sync* buttons.
 

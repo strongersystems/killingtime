@@ -3,20 +3,21 @@
 A progress and reporting app for the guild **Killing Time** (Draenor, EU). It pulls your raid logs from
 **Warcraft Logs**, realm standings from **Raider.IO**, stores everything in a local SQLite database, and gives you:
 
-- **Dashboard** – current tier at a glance: bosses down, pulls, wipes, raid nights, best wipe on the next boss,
-  progression timeline, pulls per boss, recent nights.
-- **Tiers** – tier-over-tier comparison aligned by boss order and by days since first pull (cumulative pulls,
+- **Team first** – the app opens with "which team?" (`RAID_TEAMS`, e.g. a CE team and a 6-hour team; reports are
+  attributed from attendance) and remembers the answer. Everything under a team - Progress, Roster, Nights, History,
+  Peers, Realm - shows that team's logs only; "whole guild" is one more option.
+- **Progress** – the current tier by default with a tier and difficulty switcher: bosses down, next boss and best pull,
+  pulls, nights, median parse, and a boss-by-boss table with the peer numbers inline.
+- **History** – tier-over-tier comparison aligned by boss order and by days since first pull (cumulative pulls,
   days to each kill, pulls per boss, nights per tier).
-- **Raid teams** – reports are attributed to your raid teams (`RAID_TEAMS`, e.g. a CE team and a 6-hour team) from
-  attendance, and every page has a Guild / team switcher so each team sees its own progress, pulls and nights.
 - **Peers** – "guilds around our level" for this and last tier: our pulls per boss vs the average, median and
   quartiles of guilds at a similar kill count (not the top of the server), the percentile of peers we out-pulled,
   and our days-into-tier at each kill vs the typical pace.
 - **Rivals & Realm** – head-to-head with configured rival guilds and the realm leaderboard: first-kill dates,
   pull counts, best percentages, a "progress race" chart, world/region/realm ranks.
-- **Performance** – Warcraft Logs parses on our kills: average/median/best percentile per player, per boss and per
-  raid night, filterable by team and difficulty, with other-realm pugs hidden by default.
-- **Raid nights** and **Attendance** – per-night kills/wipes/hours and attendance % per raider.
+- **Roster** – attendance % and Warcraft Logs parses (average/median/best percentile) per raider in one table, plus
+  parses per boss and per raid night; other-realm pugs hidden by default.
+- **Nights** – per-night kills, wipes and hours in combat.
 - **Public site** – a self-contained landing page (`/public`, served at `killingtime.fyi` on Cloudflare) with links
   to apply / Discord / Raider.IO / Warcraft Logs and the latest progress, per-team standings and recent kills.
   It is re-rendered and published after every sync.
@@ -77,7 +78,7 @@ burn Warcraft Logs API points on other guilds.
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 22 tests, no network needed
+pytest -q          # 36 tests, no network needed
 ruff check .
 ```
 

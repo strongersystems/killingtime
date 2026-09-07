@@ -17,16 +17,22 @@ def client(synced):
 
 
 def test_pages_render(client):
-    for path in ["/", "/?zone=44&difficulty=5", "/tiers", "/tiers?difficulty=4", "/rivals",
-                 "/rivals?raid=the-venomous-abyss&difficulty=4", "/attendance", "/nights", "/ask", "/status"]:
+    home = client.get("/").text  # no cookie yet -> team chooser
+    assert "Which team?" in home and "CE Team" in home and "Whole guild" in home
+    for path in ["/teams", "/t/guild/", "/t/guild/?tier=44&d=5", "/t/guild/history", "/t/guild/history?d=4", "/t/guild/realm",
+                 "/t/guild/realm?raid=the-venomous-abyss&d=4", "/t/guild/roster", "/t/guild/nights", "/t/guild/peers", "/ask", "/status"]:
         r = client.get(path)
         assert r.status_code == 200, path
-    home = client.get("/").text
-    assert "The Venomous Abyss" in home and "Entombed Sentinels" in home
-    tiers = client.get("/tiers").text
+    guild = client.get("/t/guild/").text
+    assert "The Venomous Abyss" in guild and "Entombed Sentinels" in guild
+    tiers = client.get("/t/guild/history").text
     assert "Manaforge Omega" in tiers
-    rivals = client.get("/rivals").text
+    rivals = client.get("/t/guild/realm").text
     assert "Internet Diff" in rivals and "Realm standings" in rivals
+    # old flat URLs redirect to the team layout
+    r = client.get("/tiers?difficulty=4&team=CE+Team", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/t/ce-team/history?d=4"
+    assert client.get("/t/nope/").status_code == 404
 
 
 def test_api_endpoints(client):

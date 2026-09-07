@@ -2,28 +2,27 @@
 {% block title %}Peers{% endblock %}
 {% block content %}
 {% if not raid %}
-<div class="page-head"><h1>Guilds around our level</h1></div>
+<div class="page-head"><h1>{{ team_label }} <span class="muted">·</span> Guilds around our level</h1></div>
 <div class="card"><p>No Raider.IO standings yet. Run a sync first (Raider.IO needs no credentials).</p></div>
 {% else %}
 <div class="page-head">
-  <div><h1>Guilds around our level <span class="pill {{ cmp.difficulty_name|lower }}">{{ cmp.difficulty_name }}</span>{% if team %} <span class="pill">{{ team }}</span>{% endif %}</h1>
+  <div><h1>{{ team_label }} <span class="muted">·</span> Guilds around our level <span class="pill {{ cmp.difficulty_name|lower }}">{{ cmp.difficulty_name }}</span></h1>
   <small>{{ raid.name }}: {{ cmp.peer_count }} guilds within ±{{ cmp.band }} boss{{ 'es' if cmp.band != 1 }} of our {{ cmp.our_kills }}/{{ cmp.total_bosses }} on Raider.IO
     (realm leaderboard and rivals), not the top of the server. Our pulls come from {{ 'our logs' if cmp.source == 'logs' else 'Raider.IO' }}.</small></div>
   <div class="filters">
-    <form method="get" action="/peers">
+    <form method="get" action="{{ request.url.path }}">
       <select class="control" name="raid" onchange="this.form.submit()">
         {% for r in raids %}<option value="{{ r.slug }}" {{ 'selected' if r.slug == raid.slug }}>{{ r.name }}</option>{% endfor %}
       </select>
-      <input type="hidden" name="difficulty" value="{{ difficulty }}">
-      {% if team %}<input type="hidden" name="team" value="{{ team }}">{% endif %}
+      <input type="hidden" name="d" value="{{ difficulty }}">
     </form>
-    <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link('/peers', raid=raid.slug, difficulty=d, team=team) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
+    <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link(request.url.path, raid=raid.slug, d=d) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
   </div>
 </div>
 
 {% if teams and not team %}
-<div class="card" style="margin-bottom:1rem"><p class="muted">Guild view: pull counts include every team's wipes on a boss, so they run higher than single-team peers.
-  For a like-for-like comparison pick a team: {% for t in teams %}<a href="{{ link('/peers', raid=raid.slug, difficulty=difficulty, team=t) }}">{{ t }}</a>{{ ' · ' if not loop.last }}{% endfor %}.</p></div>
+<div class="card" style="margin-bottom:1rem"><p class="muted">Whole-guild view: pull counts include every team's wipes on a boss, so they run higher than single-team peers.
+  For a like-for-like comparison pick a team: {% for t in teams %}<a href="{{ link('/t/' ~ t.slug ~ '/peers', raid=raid.slug, d=difficulty) }}">{{ t.name }}</a>{{ ' · ' if not loop.last }}{% endfor %}.</p></div>
 {% endif %}
 {% if not cmp.peer_count %}
 <div class="card"><p>No comparable guilds found for {{ raid.name }} {{ cmp.difficulty_name }}{% if team %} for {{ team }}{% endif %}. {% if team %}This team may not have logged pulls in this raid.{% else %}Try another difficulty.{% endif %}</p></div>
@@ -69,7 +68,7 @@
 
 {% if prev and prev.peer_count %}
 <div class="card" style="margin-top:1rem">
-  <h2>Last tier: {{ prev_raid.name }} <span class="tools"><a href="{{ link('/peers', raid=prev_raid.slug, difficulty=difficulty, team=team) }}">open →</a></span></h2>
+  <h2>Last tier: {{ prev_raid.name }} <span class="tools"><a href="{{ link(request.url.path, raid=prev_raid.slug, d=difficulty) }}">open →</a></span></h2>
   <div class="tiles">
     <div class="tile"><div class="label">Progress</div><div class="value small">{{ prev.our_kills }}/{{ prev.total_bosses }}</div><div class="sub">peer median {{ prev.peer_kills_median }}</div></div>
     <div class="tile"><div class="label">Pulls on killed bosses</div><div class="value small">{{ prev.our_total_pulls|num if prev.our_total_pulls else '—' }}</div><div class="sub">peer median {{ prev.peer_median_total_pulls|num if prev.peer_median_total_pulls else '—' }}</div></div>

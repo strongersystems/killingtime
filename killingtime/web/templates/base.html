@@ -3,45 +3,71 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Killing Time{% endblock %} · Raid Progress</title>
+  <title>{% block title %}Killing Time{% endblock %}{% if team_label %} · {{ team_label }}{% endif %} · Raid Progress</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/charts.js"></script>
 </head>
 <body>
+  {% set path = request.url.path %}
   <header class="topbar">
-    <a class="brand" href="{{ link('/', team=team) }}">
+    <a class="brand" href="/">
       <span>⚔ {{ settings.guild_name }}</span>
       <span class="faction">{{ (overview.guild.faction if overview.guild and overview.guild.faction else '') }} · {{ settings.guild_realm }} {{ settings.guild_region|upper }}</span>
     </a>
+    {% if team_slug %}
+    <label class="team-pick" title="Switch team">
+      <select onchange="location.href = this.value">
+        {% for t in teams %}<option value="/t/{{ t.slug }}/" {{ 'selected' if t.slug == team_slug }}>{{ t.name }}</option>{% endfor %}
+        <option value="/t/guild/" {{ 'selected' if team_slug == 'guild' }}>Whole guild</option>
+      </select>
+    </label>
     <nav class="nav">
-      {% set path = request.url.path %}
-      <a href="{{ link('/', team=team) }}" class="{{ 'active' if path == '/' }}">Dashboard</a>
-      <a href="{{ link('/tiers', team=team) }}" class="{{ 'active' if path.startswith('/tiers') }}">Tiers</a>
-      <a href="{{ link('/peers', team=team) }}" class="{{ 'active' if path.startswith('/peers') }}">Peers</a>
-      <a href="/rivals" class="{{ 'active' if path.startswith('/rivals') }}">Rivals &amp; Realm</a>
-      <a href="{{ link('/performance', team=team) }}" class="{{ 'active' if path.startswith('/performance') }}">Performance</a>
-      <a href="{{ link('/nights', team=team) }}" class="{{ 'active' if path.startswith('/nights') }}">Raid nights</a>
-      <a href="{{ link('/attendance', team=team) }}" class="{{ 'active' if path.startswith('/attendance') }}">Attendance</a>
-      <a href="/ask" class="{{ 'active' if path.startswith('/ask') }}">Ask ✦</a>
-      <a href="/status" class="{{ 'active' if path.startswith('/status') }}">Status</a>
+      <a href="{{ base }}/{{ '?tier=' ~ zone_id if zone_id }}" class="{{ 'active' if path == base ~ '/' }}">Progress</a>
+      <a href="{{ link(base ~ '/roster', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/roster') }}">Roster</a>
+      <a href="{{ link(base ~ '/nights', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/nights') }}">Nights</a>
+      <a href="{{ base }}/history" class="{{ 'active' if path.startswith(base ~ '/history') }}">History</a>
+      <a href="{{ link(base ~ '/peers', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/peers') }}">Peers</a>
+      <a href="{{ link(base ~ '/realm', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/realm') }}">Realm</a>
     </nav>
-    <span class="spacer"></span>
-    {% if teams %}
-    <span class="seg team-seg" title="Raid team">
-      {% set qp = request.query_params %}
-      {% set base = {} %}{% for k, v in qp.items() if k != 'team' %}{% set _ = base.update({k: v}) %}{% endfor %}
-      <a href="{{ link(path, **base) }}" class="{{ 'active' if not team }}">Guild</a>
-      {% for t in teams %}<a href="{{ link(path, **dict(base, team=t)) }}" class="{{ 'active' if t == team }}">{{ t }}</a>{% endfor %}
-    </span>
+    {% else %}
+    <nav class="nav">
+      <a href="/teams" class="{{ 'active' if path in ('/', '/teams') }}">Teams</a>
+    </nav>
     {% endif %}
-    <span class="sync">{% if sync_running %}<span class="spinner"></span>syncing…{% elif overview.last_sync %}synced {{ overview.last_sync }}{% else %}never synced{% endif %}</span>
-    <button id="theme-btn" class="theme-btn" type="button" title="Toggle theme">◐ Auto</button>
+    <span class="spacer"></span>
+    <nav class="nav util">
+      <a href="/ask" class="{{ 'active' if path.startswith('/ask') }}">Ask ✦</a>
+      <a href="/status" class="{{ 'active' if path.startswith('/status') }}" title="{% if sync_running %}syncing…{% elif overview.last_sync %}synced {{ overview.last_sync }}{% else %}never synced{% endif %}">{% if sync_running %}<span class="spinner"></span>{% endif %}Status</a>
+    </nav>
+    <button id="theme-btn" class="theme-btn" type="button" title="Toggle theme">◐</button>
   </header>
+  {% if context_bar and team_slug and zone %}
+  <div class="context">
+    <div class="context-inner">
+      <form method="get" action="{{ path }}" class="tier-form">
+        <span class="ctx-label">Tier</span>
+        <select class="control" name="tier" onchange="this.form.submit()">
+          {% for t in overview.tiers %}<option value="{{ t.id }}" {{ 'selected' if t.id == zone_id }}>{{ t.name }} · {{ t.expansion }}</option>{% endfor %}
+        </select>
+        {% if difficulty %}<input type="hidden" name="d" value="{{ difficulty }}">{% endif %}
+        {% for k, v in request.query_params.items() if k not in ('tier', 'd') %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      </form>
+      {% if difficulty %}
+      <span class="seg">
+        {% set qp = {} %}{% for k, v in request.query_params.items() if k not in ('tier', 'd') %}{% set _ = qp.update({k: v}) %}{% endfor %}
+        {% for dd in (5, 4, 3) if dd in zone.kills or dd == difficulty %}<a href="{{ link(path, **dict(qp, tier=zone_id, d=dd)) }}" class="{{ 'active' if dd == difficulty }} {{ DIFFICULTIES[dd]|lower }}">{{ DIFFICULTIES[dd] }} <b>{{ zone.kills.get(dd, 0) }}/{{ zone.bosses }}</b></a>{% endfor %}
+      </span>
+      {% endif %}
+      <span class="ctx-note">{% if zone_id == overview.tiers[0].id %}Current tier{% else %}<a href="{{ link(path, d=difficulty) }}">← back to current tier</a>{% endif %}
+        {% if unattributed %} · <span title="Logs where fewer than {{ settings.raid_team_min_matches }} roster names were present; they only count in the whole-guild view.">{{ unattributed }} log{{ 's' if unattributed != 1 }} in this tier not attributed to a team</span>{% endif %}</span>
+    </div>
+  </div>
+  {% endif %}
   <main>
     {% block content %}{% endblock %}
   </main>
-  <footer>killingtime v{{ version }} · data from <a href="https://www.warcraftlogs.com">Warcraft Logs</a> and <a href="https://raider.io">Raider.IO</a> · <a href="/public">public site preview</a></footer>
+  <footer>killingtime v{{ version }} · data from <a href="https://www.warcraftlogs.com">Warcraft Logs</a> and <a href="https://raider.io">Raider.IO</a> · <a href="/teams">switch team</a> · <a href="/public">public site</a></footer>
   {% block scripts %}{% endblock %}
 </body>
 </html>
