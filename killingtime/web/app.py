@@ -208,8 +208,13 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
         return templates.TemplateResponse(request, "teams.html", ctx(request, cards=cards))
 
     # ------------------------------------------------------------------ team pages
+    def peer_opts(peers: str | None, above: int | None, below: int | None) -> dict[str, Any]:
+        mode = peers if peers in metrics.PEER_MODES else "level"
+        return {"mode": mode, "above": 20 if above is None else max(0, min(above, 200)), "below": 20 if below is None else max(0, min(below, 200))}
+
     @app.get("/t/{slug}/", response_class=HTMLResponse)
-    def progress_page(request: Request, slug: str, tier: int | None = None, d: int | None = None):
+    def progress_page(request: Request, slug: str, tier: int | None = None, d: int | None = None,
+                      peers: str | None = None, above: int | None = None, below: int | None = None):
         c = ctx(request, slug, tier=tier, d=d)
         team, zone_id, diff = c["team"], c["zone_id"], c["difficulty"]
         if not zone_id:
@@ -224,7 +229,12 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
             rio = next((r for r in c["overview"]["raiderio"] if r["raid_slug"] == c["zone"]["rio_raid_slug"]), None)
             wcl_rank = conn.execute(
                 "SELECT * FROM wcl_zone_rankings WHERE zone_id = ? AND metric = 'progress'", (zone_id,)).fetchone()
-            peers = metrics.peer_comparison(conn, c["zone"]["rio_raid_slug"], diff, team) if c["zone"]["rio_raid_slug"] else None
+            popts = peer_opts(peers, above, below)
+            prev_slug = None
+            if popts["mode"] == "cohort":
+                raids = [r for r in metrics.rio_raids_for_zone(conn) if r["slug"] != c["zone"]["rio_raid_slug"] and r["bosses"] > 1]
+                prev_slug = raids[0]["slug"] if raids else None
+            peers = metrics.peer_comparison(conn, c["zone"]["rio_raid_slug"], diff, team, prev_raid_slug=prev_slug, **popts) if c["zone"]["rio_raid_slug"] else None
         peer_by_slug = {b["slug"]: b for b in peers["bosses"]} if peers else {}
         for b in summary["bosses"]:
             b["peer"] = peer_by_slug.get(b["rio_encounter_slug"])
@@ -298,19 +308,23 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
         return raids, chosen, diff
 
     @app.get("/t/{slug}/peers", response_class=HTMLResponse)
-    def peers_page(request: Request, slug: str, raid: str | None = None, tier: int | None = None, d: int | None = None):
+    def peers_page(request: Request, slug: str, raid: str | None = None, tier: int | None = None, d: int | None = None,
+                   peers: str | None = None, above: int | None = None, below: int | None = None):
         c = ctx(request, slug, tier=tier, d=d)
         raids, chosen, diff = raid_selection(raid, d, c["team"], c["zone_id"])
         if not chosen:
             return with_cookie(templates.TemplateResponse(request, "peers.html", {**c, "raids": [], "raid": None}), slug)
+        popts = peer_opts(peers, above, below)
         with db_lock:
-            cmp = metrics.peer_comparison(conn, chosen["slug"], diff, c["team"])
             others = [r for r in raids if r["slug"] != chosen["slug"] and r["bosses"] > 1]
-            prev = metrics.peer_comparison(conn, others[0]["slug"], diff, c["team"]) if others else None
+            prev_raid = others[0] if others else None
+            cmp = metrics.peer_comparison(conn, chosen["slug"], diff, c["team"], prev_raid_slug=prev_raid["slug"] if prev_raid else None, **popts)
+            prev = metrics.peer_comparison(conn, prev_raid["slug"], diff, c["team"], **popts) if (prev_raid and popts["mode"] != "cohort") else None
         return with_cookie(templates.TemplateResponse(
             request, "peers.html",
-            {**c, "raids": raids, "raid": chosen, "difficulty": diff, "cmp": cmp, "prev": prev, "prev_raid": others[0] if others else None,
-             "chart_data": json.dumps({"cmp": cmp, "prev": prev, "prev_raid": others[0] if others else None}, default=str)}), slug)
+            {**c, "raids": raids, "raid": chosen, "difficulty": diff, "cmp": cmp, "prev": prev, "prev_raid": prev_raid, "popts": popts,
+             "modes": metrics.PEER_MODES,
+             "chart_data": json.dumps({"cmp": cmp, "prev": prev, "prev_raid": prev_raid}, default=str)}), slug)
 
     @app.get("/t/{slug}/realm", response_class=HTMLResponse)
     def realm_page(request: Request, slug: str, raid: str | None = None, tier: int | None = None, d: int | None = None):
@@ -426,9 +440,10 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
             return as_json(metrics.rival_comparison(conn, raid_slug, difficulty))
 
     @app.get("/api/peers/{raid_slug}")
-    def api_peers(raid_slug: str, difficulty: int = 5, team: str | None = None):
+    def api_peers(raid_slug: str, difficulty: int = 5, team: str | None = None, peers: str | None = None,
+                  above: int | None = None, below: int | None = None, prev: str | None = None):
         with db_lock:
-            return as_json(metrics.peer_comparison(conn, raid_slug, difficulty, team))
+            return as_json(metrics.peer_comparison(conn, raid_slug, difficulty, team, prev_raid_slug=prev, **peer_opts(peers, above, below)))
 
     @app.get("/api/performance/{zone_id}")
     def api_performance(zone_id: int, difficulty: int | None = None, team: str | None = None, pugs: bool = False):

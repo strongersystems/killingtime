@@ -169,7 +169,7 @@ def test_web_pages_with_teams(synced):
     guild = client.get("/t/guild/").text
     assert "Whole-guild" in guild or "Whole guild" in guild
     peers = client.get("/t/6-hour-team/peers?d=4").text
-    assert "Guilds around our level" in peers and "Internet Diff" in peers
+    assert "Similar progress" in peers and "Internet Diff" in peers
     roster = client.get("/t/6-hour-team/roster?tier=46&d=4").text
     assert "Tagrik" in roster and "Puggy" not in roster and "Attendance" in roster
     assert "Puggy" in client.get("/t/6-hour-team/roster?tier=46&d=4&pugs=1").text
@@ -215,3 +215,35 @@ def test_migration_adds_columns(tmp_path):
     conn = connect(str(path))
     cols = {c["name"] for c in conn.execute("PRAGMA table_info('reports')")}
     assert "rankings_synced_at" in cols
+
+
+def test_peer_modes(synced):
+    conn, *_ = synced
+    # around our realm rank: the home guild is realm #3 on mythic; both other realm guilds sit within 20 places
+    rank = metrics.peer_comparison(conn, "the-venomous-abyss", 5, mode="rank", above=20, below=20)
+    assert rank["mode"] == "rank" and rank["our_rank"] == 3 and rank["rank_estimated"] is False
+    assert [p["name"] for p in rank["peers"]] == ["Internet Diff", "Advance"] and rank["peers_ahead"] == 2
+    assert metrics.peer_comparison(conn, "the-venomous-abyss", 5, mode="rank", above=1, below=0)["peer_count"] == 1
+    # a team whose progress differs from the guild's gets an estimated rank from its own kills
+    six = metrics.peer_comparison(conn, "the-venomous-abyss", 5, team="6 Hour Team", mode="rank")
+    assert six["our_kills"] == 0 and six["our_rank"] is None and six["peer_count"] == 0
+    # cohort: last tier only has us ranked in the fixture, so the cohort is empty but our previous rank is known
+    cohort = metrics.peer_comparison(conn, "the-venomous-abyss", 5, mode="cohort", prev_raid_slug="manaforge-omega")
+    assert cohort["mode"] == "cohort" and cohort["prev"]["our_rank"] == 1 and cohort["prev"]["raid_name"] == "Manaforge Omega"
+    assert cohort["peer_count"] == 0
+    # unknown modes fall back to similar progress
+    assert metrics.peer_comparison(conn, "the-venomous-abyss", 5, mode="bogus")["mode"] == "level"
+    rank_est = metrics.our_realm_rank(conn, "the-venomous-abyss", 4, "6 Hour Team")
+    assert rank_est[2] == 3 and rank_est[0] is not None
+
+
+def test_peer_modes_web(synced):
+    conn, *_, settings = synced
+    client = TestClient(create_app(settings, conn))
+    for path in ["/t/guild/peers?peers=rank&above=5&below=5", "/t/guild/peers?peers=cohort", "/t/ce-team/peers?peers=rank",
+                 "/t/guild/?peers=rank&above=10&below=10", "/t/6-hour-team/peers?d=4&peers=cohort&above=30&below=30"]:
+        assert client.get(path).status_code == 200, path
+    page = client.get("/t/guild/peers?peers=rank&above=5&below=5").text
+    assert "Around our realm rank" in page and "Realm rank" in page and "5 places above" in page
+    api = client.get("/api/peers/the-venomous-abyss?difficulty=5&peers=rank").json()
+    assert api["mode"] == "rank" and api["peer_count"] == 2

@@ -6,18 +6,37 @@
 <div class="card"><p>No Raider.IO standings yet. Run a sync first (Raider.IO needs no credentials).</p></div>
 {% else %}
 <div class="page-head">
-  <div><h1>{{ team_label }} <span class="muted">·</span> Guilds around our level <span class="pill {{ cmp.difficulty_name|lower }}">{{ cmp.difficulty_name }}</span></h1>
-  <small>{{ raid.name }}: {{ cmp.peer_count }} guilds within ±{{ cmp.band }} boss{{ 'es' if cmp.band != 1 }} of our {{ cmp.our_kills }}/{{ cmp.total_bosses }} on Raider.IO
-    (realm leaderboard and rivals), not the top of the server. Our pulls come from {{ 'our logs' if cmp.source == 'logs' else 'Raider.IO' }}.</small></div>
+  <div><h1>{{ team_label }} <span class="muted">·</span> Peers <span class="pill {{ cmp.difficulty_name|lower }}">{{ cmp.difficulty_name }}</span></h1>
+  <small>{{ raid.name }} ·
+    {% if cmp.mode == 'rank' %}{{ cmp.peer_count }} {{ settings.guild_realm }} guilds from {{ cmp.above }} places above to {{ cmp.below }} below our realm rank{% if cmp.our_rank %} (#{{ cmp.our_rank }}{{ ', estimated from this team\'s kills' if cmp.rank_estimated }}){% endif %}.
+    {% elif cmp.mode == 'cohort' %}{% if cmp.prev and cmp.prev.our_rank %}the {{ cmp.peer_count }} {{ settings.guild_realm }} guilds that were within {{ cmp.above }} above / {{ cmp.below }} below our #{{ cmp.prev.our_rank }}{{ ' (estimated)' if cmp.prev.estimated }} in {{ cmp.prev.raid_name }}, and where they are in {{ raid.name }} now{% if cmp.prev.missing %} ({{ cmp.prev.missing }} of them have no progress here yet){% endif %}.{% else %}no rank for us in the previous tier, so no cohort to follow.{% endif %}
+    {% else %}{{ cmp.peer_count }} guilds within ±{{ cmp.band }} boss{{ 'es' if cmp.band != 1 }} of our {{ cmp.our_kills }}/{{ cmp.total_bosses }} on Raider.IO (realm leaderboard and rivals), nearest ranks first.{% endif %}
+    Our pulls come from {{ 'our logs' if cmp.source == 'logs' else 'Raider.IO' }}.</small></div>
   <div class="filters">
     <form method="get" action="{{ request.url.path }}">
       <select class="control" name="raid" onchange="this.form.submit()">
         {% for r in raids %}<option value="{{ r.slug }}" {{ 'selected' if r.slug == raid.slug }}>{{ r.name }}</option>{% endfor %}
       </select>
       <input type="hidden" name="d" value="{{ difficulty }}">
+      <input type="hidden" name="peers" value="{{ popts.mode }}"><input type="hidden" name="above" value="{{ popts.above }}"><input type="hidden" name="below" value="{{ popts.below }}">
     </form>
-    <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link(request.url.path, raid=raid.slug, d=d) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
+    <span class="seg">{% for d in (5, 4, 3) %}<a href="{{ link(request.url.path, raid=raid.slug, d=d, peers=popts.mode, above=popts.above, below=popts.below) }}" class="{{ 'active' if d == difficulty }}">{{ DIFFICULTIES[d] }}</a>{% endfor %}</span>
   </div>
+</div>
+
+<div class="card peer-modes" style="margin-bottom:1rem">
+  <form method="get" action="{{ request.url.path }}" class="filters">
+    <input type="hidden" name="raid" value="{{ raid.slug }}"><input type="hidden" name="d" value="{{ difficulty }}">
+    <span class="ctx-label">Compare with</span>
+    <span class="seg">{% for m, label in modes.items() %}<a href="{{ link(request.url.path, raid=raid.slug, d=difficulty, peers=m, above=popts.above, below=popts.below) }}" class="{{ 'active' if m == popts.mode }}">{{ label }}</a>{% endfor %}</span>
+    <input type="hidden" name="peers" value="{{ popts.mode }}">
+    {% if popts.mode != 'level' %}
+    <label class="muted">guilds <input class="control num-input" type="number" name="above" min="0" max="200" value="{{ popts.above }}"> above us and</label>
+    <label class="muted"><input class="control num-input" type="number" name="below" min="0" max="200" value="{{ popts.below }}"> below{% if popts.mode == 'cohort' %} in {{ prev_raid.name if prev_raid else 'the previous tier' }}{% endif %}</label>
+    <button class="btn secondary" type="submit">Apply</button>
+    {% endif %}
+    <span class="muted" style="margin-left:auto">{% if cmp.mode == 'level' %}Guilds at a similar kill count, whatever their rank.{% elif cmp.mode == 'rank' %}The neighbourhood on the realm ladder right now.{% else %}Follows last tier's neighbours into this tier.{% endif %}</span>
+  </form>
 </div>
 
 {% if teams and not team %}
@@ -30,11 +49,13 @@
 <div class="tiles">
   <div class="tile hero"><div class="label">Our progress</div><div class="value">{{ cmp.our_kills }}<span class="muted">/{{ cmp.total_bosses }}</span></div>
     <div class="sub">peer median {{ cmp.peer_kills_median if cmp.peer_kills_median is not none else '—' }}/{{ cmp.total_bosses }}</div></div>
+  {% if cmp.our_rank %}<div class="tile"><div class="label">Realm rank{{ ' (est.)' if cmp.rank_estimated }}</div><div class="value">#{{ cmp.our_rank }}</div>
+    <div class="sub">{{ cmp.peers_ahead }} peers ahead · {{ cmp.peers_behind }} behind{% if cmp.mode == 'cohort' and cmp.prev and cmp.prev.our_rank %} · was #{{ cmp.prev.our_rank }} last tier{% endif %}</div></div>{% endif %}
   <div class="tile"><div class="label">Pulls on killed bosses</div><div class="value">{{ cmp.our_total_pulls|num if cmp.our_total_pulls else '—' }}</div>
     <div class="sub">peer median {{ cmp.peer_median_total_pulls|num if cmp.peer_median_total_pulls else '—' }} on the same bosses</div></div>
   <div class="tile"><div class="label">Pull efficiency</div><div class="value">{{ (cmp.overall_beat_pct ~ '%') if cmp.overall_beat_pct is not none else '—' }}</div>
     <div class="sub">of peers needed more pulls than us</div></div>
-  <div class="tile"><div class="label">Peer group</div><div class="value">{{ cmp.peer_count }}</div><div class="sub">guilds at {{ cmp.our_kills - cmp.band if cmp.our_kills - cmp.band > 0 else 1 }}–{{ [cmp.our_kills + cmp.band, cmp.total_bosses]|min }} bosses</div></div>
+  <div class="tile"><div class="label">Peer group</div><div class="value">{{ cmp.peer_count }}</div><div class="sub">{% if cmp.mode == 'level' %}guilds at {{ cmp.our_kills - cmp.band if cmp.our_kills - cmp.band > 0 else 1 }}–{{ [cmp.our_kills + cmp.band, cmp.total_bosses]|min }} bosses{% elif cmp.mode == 'rank' %}realm #{{ [cmp.our_rank - cmp.above, 1]|max }}–#{{ cmp.our_rank + cmp.below }}{% else %}last tier's #{{ [cmp.prev.our_rank - cmp.above, 1]|max }}–#{{ cmp.prev.our_rank + cmp.below }}{% endif %}</div></div>
 </div>
 
 <div class="card" style="margin-bottom:1rem">
@@ -78,11 +99,14 @@
 {% endif %}
 
 <div class="card" style="margin-top:1rem">
-  <h2>The peer group</h2>
+  <h2>The peer group <span class="tools muted">Realm # shows the distance from our rank in brackets{% if cmp.mode == 'cohort' %}; Moved = places climbed (▲) or dropped (▼) since last tier{% endif %}</span></h2>
   <div class="table-scroll">
   <table>
-    <thead><tr><th>Guild</th><th>Realm</th><th class="num">Killed</th><th class="num">Pulls</th><th class="num">Realm #</th><th class="num">World #</th></tr></thead>
-    <tbody>{% for g in cmp.peers %}<tr class="{{ 'rival' if g.is_rival }}"><td>{{ g.name }}</td><td class="muted">{{ g.realm }}</td><td class="num">{{ g.killed }}/{{ cmp.total_bosses }}</td><td class="num">{{ g.pulls|num if g.pulls else 'hidden' }}</td><td class="num">{{ g.realm_rank or '—' }}</td><td class="num">{{ g.world_rank|num if g.world_rank else '—' }}</td></tr>{% endfor %}</tbody>
+    <thead><tr><th>Guild</th><th>Realm</th><th class="num">Killed</th><th>Latest kill</th><th class="num">Pulls</th><th class="num">Realm #</th>{% if cmp.mode == 'cohort' %}<th class="num">Last tier #</th><th class="num">Moved</th>{% endif %}<th class="num">World #</th></tr></thead>
+    <tbody>{% for g in cmp.peers %}<tr class="{{ 'rival' if g.is_rival }}"><td>{{ g.name }}</td><td class="muted">{{ g.realm }}</td><td class="num">{{ g.killed }}/{{ cmp.total_bosses }}</td><td>{{ g.latest_kill or '—' }}</td><td class="num">{{ g.pulls|num if g.pulls else 'hidden' }}</td>
+      <td class="num">{% if g.realm_rank %}{{ g.realm_rank }}{% if cmp.our_rank %} <span class="muted">({{ '+' if g.realm_rank > cmp.our_rank }}{{ g.realm_rank - cmp.our_rank }})</span>{% endif %}{% else %}—{% endif %}</td>
+      {% if cmp.mode == 'cohort' %}<td class="num">{{ g.prev_rank or '—' }}</td><td class="num">{% if g.rank_delta is not none %}<span class="pill {{ 'good' if g.rank_delta > 0 else ('bad' if g.rank_delta < 0) }}">{{ '▲' if g.rank_delta > 0 else ('▼' if g.rank_delta < 0 else '=') }} {{ g.rank_delta|abs }}</span>{% else %}—{% endif %}</td>{% endif %}
+      <td class="num">{{ g.world_rank|num if g.world_rank else '—' }}</td></tr>{% endfor %}</tbody>
   </table>
   </div>
 </div>

@@ -185,3 +185,6 @@ tr.active td:nth-child(2)::after { content: " · in progress"; color: var(--warn
 .team-card .lines { display: flex; gap: .4rem; flex-wrap: wrap; margin: .6rem 0 .4rem; }
 .team-card .sub { font-size: .85rem; color: var(--ink-2); }
 .team-card .go { margin-top: .8rem; color: var(--accent); font-weight: 600; }
+
+.num-input { width: 4.5rem; padding: .3rem .4rem; }
+.peer-modes .filters { gap: .6rem; }

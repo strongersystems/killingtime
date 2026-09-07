@@ -469,24 +469,29 @@ def _our_boss_progress(conn: sqlite3.Connection, raid_slug: str, difficulty: int
     return out
 
 
-def peer_comparison(
-    conn: sqlite3.Connection, raid_slug: str, difficulty: int, team: str | None = None, min_peers: int = 8, max_peers: int = 40
-) -> dict[str, Any]:
-    """Compare us with guilds at a similar point in the raid ("around our level"), not the realm's top.
+PEER_MODES = {
+    "level": "Similar progress",
+    "rank": "Around our realm rank",
+    "cohort": "Last tier's neighbours",
+}
 
-    Peers are guilds (realm leaderboard + rivals) whose kill count is within a band of ours; the band widens until
-    at least ``min_peers`` qualify. Per boss: our pulls vs the peers' average/median/quartiles, the share of peers we
-    out-pulled (percentile), and days from the guild's first pull in the raid to the kill vs the peers' typical."""
-    bosses = _rows(conn, "SELECT slug, name, ord FROM rio_encounters WHERE raid_slug = ? ORDER BY ord", (raid_slug,))
-    home = home_guild(conn)
-    home_id = home["id"] if home else -1
-    ours = _our_boss_progress(conn, raid_slug, difficulty, team)
-    our_kills = sum(1 for b in bosses if ours.get(b["slug"], {}).get("killed"))
-    our_start = min((v["started_ms"] for v in ours.values() if v.get("started_ms")), default=None)
 
+def _realm_position(candidates: list[dict], kills: int, latest_ms: int | None) -> int | None:
+    """Estimate a realm rank from a kill count: Raider.IO ranks by bosses killed, then by who killed them first."""
+    if kills <= 0:
+        return None
+    ahead = sum(
+        1 for c in candidates
+        if c["killed"] > kills or (c["killed"] == kills and latest_ms and c["latest_ms"] and c["latest_ms"] < latest_ms)
+    )
+    return ahead + 1
+
+
+def _realm_candidates(conn: sqlite3.Connection, raid_slug: str, difficulty: int, home_id: int) -> list[dict]:
+    """Other guilds with Raider.IO progress in a raid/difficulty, with their kill count, ranks and per-boss rows."""
     guild_rows = _rows(
         conn,
-        """SELECT g.id, g.name, g.realm_slug, g.is_rival, rk.realm_rank, rk.world_rank
+        """SELECT g.id, g.name, g.realm_slug, g.region, g.is_rival, rk.realm_rank, rk.world_rank
            FROM guilds g LEFT JOIN rio_rankings rk ON rk.guild_id = g.id AND rk.raid_slug = ? AND rk.difficulty = ?
            WHERE g.is_home = 0 AND EXISTS (SELECT 1 FROM rio_progress p WHERE p.guild_id = g.id AND p.raid_slug = ? AND p.difficulty = ?)""",
         (raid_slug, difficulty, raid_slug, difficulty),
@@ -499,36 +504,104 @@ def peer_comparison(
     by_guild: dict[int, dict[str, dict]] = {}
     for p in prog_rows:
         by_guild.setdefault(p["guild_id"], {})[p["encounter_slug"]] = p
-    candidates = []
+    out = []
     for g in guild_rows:
         prog = by_guild.get(g["id"], {})
-        killed = sum(1 for p in prog.values() if p["is_defeated"])
         starts = [p["pull_started_at"] or p["first_defeated"] for p in prog.values() if (p["pull_started_at"] or p["first_defeated"])]
-        candidates.append({**g, "killed": killed, "prog": prog, "start_ms": min(starts) if starts else None,
-                           "has_pulls": any((p["num_pulls"] or 0) > 0 for p in prog.values())})
-    band = 0
-    peers: list[dict] = []
-    while band <= len(bosses):
-        peers = [c for c in candidates if abs(c["killed"] - our_kills) <= band and c["killed"] > 0]
-        if len(peers) >= min_peers:
-            break
-        band += 1
-    # Closest kill counts first, then the guilds ranked nearest to us. Our own rank only describes the team when the
-    # team's progress is the guild's (Raider.IO knows guilds, not teams); otherwise use the middle of the band.
-    home_prog = by_guild_home = {p["encounter_slug"]: p for p in _rows(
-        conn, "SELECT encounter_slug, is_defeated FROM rio_progress WHERE guild_id = ? AND raid_slug = ? AND difficulty = ?",
-        (home_id, raid_slug, difficulty))}
-    guild_kills = sum(1 for p in by_guild_home.values() if p["is_defeated"])
-    home_rank = conn.execute(
+        kills = [p["first_defeated"] for p in prog.values() if p["is_defeated"] and p["first_defeated"]]
+        out.append({**g, "killed": sum(1 for p in prog.values() if p["is_defeated"]), "prog": prog,
+                    "start_ms": min(starts) if starts else None, "latest_ms": max(kills) if kills else None,
+                    "has_pulls": any((p["num_pulls"] or 0) > 0 for p in prog.values())})
+    return out
+
+
+def our_realm_rank(conn: sqlite3.Connection, raid_slug: str, difficulty: int, team: str | None, ours: dict | None = None,
+                   candidates: list[dict] | None = None) -> tuple[int | None, bool, int]:
+    """(realm rank, estimated?, kills). Raider.IO ranks the guild; when a team's progress differs from the guild's,
+    the team's rank is estimated from its own kill count against the realm leaderboard."""
+    home = home_guild(conn)
+    home_id = home["id"] if home else -1
+    ours = ours if ours is not None else _our_boss_progress(conn, raid_slug, difficulty, team)
+    our_kills = sum(1 for v in ours.values() if v.get("killed"))
+    guild_kills = conn.execute(
+        "SELECT COUNT(*) AS c FROM rio_progress WHERE guild_id = ? AND raid_slug = ? AND difficulty = ? AND is_defeated = 1",
+        (home_id, raid_slug, difficulty),
+    ).fetchone()["c"]
+    rank_row = conn.execute(
         "SELECT realm_rank FROM rio_rankings WHERE guild_id = ? AND raid_slug = ? AND difficulty = ?", (home_id, raid_slug, difficulty)
     ).fetchone()
-    ranks = sorted(c["realm_rank"] for c in peers if c["realm_rank"])
-    if home_rank and home_rank["realm_rank"] and (our_kills == guild_kills or not home_prog):
-        reference = home_rank["realm_rank"]
+    if rank_row and rank_row["realm_rank"] and (not team or our_kills == guild_kills):
+        return int(rank_row["realm_rank"]), False, our_kills
+    cands = candidates if candidates is not None else _realm_candidates(conn, raid_slug, difficulty, home_id)
+    realm = [c for c in cands if home and c["realm_slug"] == home["realm_slug"] and c["region"] == home["region"]]
+    latest = max((v["first_kill_ms"] for v in ours.values() if v.get("first_kill_ms")), default=None)
+    return _realm_position(realm, our_kills, latest), True, our_kills
+
+
+def peer_comparison(
+    conn: sqlite3.Connection, raid_slug: str, difficulty: int, team: str | None = None, min_peers: int = 8, max_peers: int = 40,
+    mode: str = "level", above: int = 20, below: int = 20, prev_raid_slug: str | None = None,
+) -> dict[str, Any]:
+    """Compare us with a peer group of other guilds (realm leaderboard + rivals), chosen by ``mode``:
+
+    * ``level``: guilds whose kill count is within a band of ours (the band widens until ``min_peers`` qualify),
+      nearest realm ranks first - "guilds around our level", not the realm's top.
+    * ``rank``: guilds on our realm ranked from ``above`` places above us to ``below`` places below us.
+    * ``cohort``: the guilds that were within ``above``/``below`` realm ranks of us in ``prev_raid_slug`` (last tier),
+      wherever they are now - did we move with, past or behind last tier's neighbours?
+
+    Per boss: our pulls vs the peers' average/median/quartiles, the share of peers we out-pulled (percentile), and
+    days from the guild's first pull in the raid to the kill vs the peers' typical."""
+    bosses = _rows(conn, "SELECT slug, name, ord FROM rio_encounters WHERE raid_slug = ? ORDER BY ord", (raid_slug,))
+    home = home_guild(conn)
+    home_id = home["id"] if home else -1
+    ours = _our_boss_progress(conn, raid_slug, difficulty, team)
+    our_kills = sum(1 for b in bosses if ours.get(b["slug"], {}).get("killed"))
+    our_start = min((v["started_ms"] for v in ours.values() if v.get("started_ms")), default=None)
+
+    candidates = _realm_candidates(conn, raid_slug, difficulty, home_id)
+    home_realm = [c for c in candidates if home and c["realm_slug"] == home["realm_slug"] and c["region"] == home["region"]]
+    our_rank, rank_estimated, _ = our_realm_rank(conn, raid_slug, difficulty, team, ours, candidates)
+    above, below = max(0, int(above)), max(0, int(below))
+
+    band = 0
+    peers: list[dict] = []
+    prev: dict[str, Any] | None = None
+    if mode == "rank":
+        if our_rank:
+            peers = sorted((c for c in home_realm if c["realm_rank"] and our_rank - above <= c["realm_rank"] <= our_rank + below),
+                           key=lambda c: c["realm_rank"])
+    elif mode == "cohort":
+        prev = {"raid_slug": prev_raid_slug, "our_rank": None, "estimated": False, "missing": 0, "raid_name": None}
+        if prev_raid_slug:
+            prev_row = conn.execute("SELECT name FROM rio_raids WHERE slug = ?", (prev_raid_slug,)).fetchone()
+            prev["raid_name"] = prev_row["name"] if prev_row else prev_raid_slug
+            prev_cands = _realm_candidates(conn, prev_raid_slug, difficulty, home_id)
+            prev_rank, prev_est, _ = our_realm_rank(conn, prev_raid_slug, difficulty, team, candidates=prev_cands)
+            prev.update(our_rank=prev_rank, estimated=prev_est)
+            if prev_rank:
+                cohort = {c["id"]: c["realm_rank"] for c in prev_cands
+                          if c["realm_rank"] and home and c["realm_slug"] == home["realm_slug"] and c["region"] == home["region"]
+                          and prev_rank - above <= c["realm_rank"] <= prev_rank + below}
+                now = {c["id"]: c for c in candidates}
+                for gid, r in cohort.items():
+                    if gid in now:
+                        now[gid]["prev_rank"] = r
+                        peers.append(now[gid])
+                prev["missing"] = len(cohort) - len(peers)
+                peers.sort(key=lambda c: c["prev_rank"])
     else:
-        reference = ranks[len(ranks) // 2] if ranks else 0
-    peers.sort(key=lambda c: (abs(c["killed"] - our_kills), abs((c["realm_rank"] or 10**6) - reference)))
-    peers = peers[:max_peers]
+        mode = "level"
+        while band <= len(bosses):
+            peers = [c for c in candidates if abs(c["killed"] - our_kills) <= band and c["killed"] > 0]
+            if len(peers) >= min_peers:
+                break
+            band += 1
+        # Closest kill counts first, then the guilds ranked nearest to us (or to the middle of the band).
+        ranks = sorted(c["realm_rank"] for c in peers if c["realm_rank"])
+        reference = our_rank or (ranks[len(ranks) // 2] if ranks else 0)
+        peers.sort(key=lambda c: (abs(c["killed"] - our_kills), abs((c["realm_rank"] or 10**6) - reference)))
+        peers = peers[:max_peers]
 
     per_boss = []
     for b in bosses:
@@ -585,6 +658,15 @@ def peer_comparison(
         "our_kills": our_kills,
         "total_bosses": len(bosses),
         "band": band,
+        "mode": mode,
+        "mode_label": PEER_MODES.get(mode, mode),
+        "above": above,
+        "below": below,
+        "our_rank": our_rank,
+        "rank_estimated": rank_estimated,
+        "prev": prev,
+        "peers_ahead": sum(1 for c in peers if c["realm_rank"] and our_rank and c["realm_rank"] < our_rank),
+        "peers_behind": sum(1 for c in peers if c["realm_rank"] and our_rank and c["realm_rank"] > our_rank),
         "peer_count": len(peers),
         "peer_kills_median": _median([c["killed"] for c in peers]),
         "our_total_pulls": our_total or None,
@@ -593,7 +675,9 @@ def peer_comparison(
         "bosses": per_boss,
         "peers": [
             {"name": c["name"], "realm": c["realm_slug"], "killed": c["killed"], "realm_rank": c["realm_rank"], "world_rank": c["world_rank"],
-             "is_rival": bool(c["is_rival"]), "pulls": sum((p["num_pulls"] or 0) for p in c["prog"].values()) or None}
+             "is_rival": bool(c["is_rival"]), "pulls": sum((p["num_pulls"] or 0) for p in c["prog"].values()) or None,
+             "latest_kill": ms_to_date(c["latest_ms"]), "prev_rank": c.get("prev_rank"),
+             "rank_delta": (c["prev_rank"] - c["realm_rank"]) if (c.get("prev_rank") and c["realm_rank"]) else None}
             for c in peers
         ],
     }
