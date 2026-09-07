@@ -131,9 +131,17 @@ document.querySelectorAll(".portrait-stack").forEach((stack) => {
   const frames = [...stack.querySelectorAll(".anim")];
   if (!frames.length) return;
   let loaded = 0, timer = null, i = 0;
-  frames.forEach((img) => {
-    img.addEventListener("load", () => { if (++loaded === frames.length) ready(); }, { once: true });
-    img.addEventListener("error", () => { frames.forEach((f) => f.remove()); }, { once: true });
+  // The hero shot stands alone: if frame 1 exists it becomes the portrait even when the other four do not.
+  frames.forEach((img, k) => {
+    img.addEventListener("load", () => {
+      if (k === 0) show(0);
+      if (++loaded === frames.length) ready();
+    }, { once: true });
+    img.addEventListener("error", () => {
+      frames.slice(1).forEach((f) => f.remove());          // no animation, but keep the hero shot
+      frames.length = Math.min(frames.length, k === 0 ? 0 : 1);
+      if (k === 0) { const b = stack.querySelector(".base"); if (b) b.style.visibility = ""; }
+    }, { once: true });
     img.src = img.dataset.src;
   });
 
