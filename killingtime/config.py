@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     raid_teams: str = ""
     raid_team_min_matches: int = 2
     # Parses: how many reports' rankings to fetch per sync (keeps the WCL points budget in check).
-    sync_parses_per_run: int = 120
+    sync_parses_per_run: int = 60
 
     # Ask (Claude)
     anthropic_api_key: str = ""

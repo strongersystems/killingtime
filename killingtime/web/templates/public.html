@@ -24,7 +24,8 @@
     .links a.primary { background: var(--gold); color: #1a1408; border-color: var(--gold); font-weight: 700; }
     .hero { padding: 2.5rem 0 1.5rem; }
     .hero h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 850; letter-spacing: -.02em; line-height: 1.05; }
-    .hero h1 span { color: var(--gold); }
+    .hero .kicker { margin-top: .5rem; font-size: 1.15rem; font-weight: 700; color: var(--ink-2); letter-spacing: .01em; }
+    .hero .kicker span { color: var(--gold); }
     .hero p { color: var(--ink-2); max-width: 60ch; font-size: 1.05rem; margin: .8rem 0 0; }
     .recruit { display: inline-flex; align-items: center; gap: .5rem; margin-top: 1rem; padding: .5rem .9rem; border-radius: 10px; background: rgba(232,176,74,.12); border: 1px solid rgba(232,176,74,.35); color: var(--ink); font-weight: 600; }
     .recruit::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 4px rgba(57,192,106,.2); }
@@ -85,7 +86,8 @@
   </header>
 
   <section class="hero">
-    <h1>{{ settings.name }} <span>{{ guild.faction|default('', true)|capitalize }}</span><br>{{ settings.realm }} <span class="muted">{{ settings.region }}</span></h1>
+    <h1>{{ settings.name }}</h1>
+    <div class="kicker"><span>{{ guild.faction|default('', true)|capitalize }}</span> raiding guild · {{ settings.realm }} {{ settings.region }}</div>
     <p>{{ settings.tagline or (settings.name ~ " is a " ~ (guild.faction|default('', true)) ~ " raiding guild on " ~ settings.realm ~ " (" ~ settings.region ~ ")" ~ (" raiding as " ~ teams|join(" and ") if teams else "") ~ ". Progress below updates automatically from Warcraft Logs and Raider.IO.") }}</p>
     {% if settings.recruiting %}<div class="recruit">{{ settings.recruiting }}</div>{% endif %}
   </section>

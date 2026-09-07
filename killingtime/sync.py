@@ -297,6 +297,8 @@ def sync_zone_rankings(conn: sqlite3.Connection, wcl: WCLClient, guild_id: int, 
             stats.warn(f"zone ranking unavailable for zone {zid}: {exc}", progress)
             continue
         with transaction(conn):
+            # The progress row has a NULL difficulty, which the primary key cannot de-duplicate: clear the zone first.
+            conn.execute("DELETE FROM wcl_zone_rankings WHERE guild_id = ? AND zone_id = ?", (guild_id, zid))
             for metric in ("progress", "speed", "completeRaidSpeed"):
                 pos = rk.get(metric) or {}
                 if not pos:

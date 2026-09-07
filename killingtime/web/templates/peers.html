@@ -21,6 +21,10 @@
   </div>
 </div>
 
+{% if teams and not team %}
+<div class="card" style="margin-bottom:1rem"><p class="muted">Guild view: pull counts include every team's wipes on a boss, so they run higher than single-team peers.
+  For a like-for-like comparison pick a team: {% for t in teams %}<a href="{{ link('/peers', raid=raid.slug, difficulty=difficulty, team=t) }}">{{ t }}</a>{{ ' · ' if not loop.last }}{% endfor %}.</p></div>
+{% endif %}
 {% if not cmp.peer_count %}
 <div class="card"><p>No comparable guilds found for {{ raid.name }} {{ cmp.difficulty_name }}{% if team %} for {{ team }}{% endif %}. {% if team %}This team may not have logged pulls in this raid.{% else %}Try another difficulty.{% endif %}</p></div>
 {% else %}

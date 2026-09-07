@@ -212,9 +212,11 @@ MIGRATIONS: list[tuple[str, str, str]] = [
 
 VIEWS = """
 DROP VIEW IF EXISTS v_pulls;
+-- zone_id is the boss's zone, not the report's: a log can contain pulls from several raids (e.g. clearing an
+-- older tier on the same night), and each pull must count towards the tier the boss belongs to.
 CREATE VIEW v_pulls AS
 SELECT
-    f.report_code, f.fight_id, r.guild_id, r.zone_id, z.name AS zone_name,
+    f.report_code, f.fight_id, r.guild_id, e.zone_id, z.name AS zone_name,
     f.encounter_id, e.name AS encounter_name, e.ord AS encounter_ord,
     f.difficulty, f.kill, f.start_time, f.end_time,
     (f.end_time - f.start_time) / 1000.0 AS duration_s,
@@ -224,7 +226,7 @@ SELECT
 FROM fights f
 JOIN reports r ON r.code = f.report_code
 JOIN encounters e ON e.id = f.encounter_id
-JOIN zones z ON z.id = r.zone_id
+JOIN zones z ON z.id = e.zone_id
 LEFT JOIN report_teams t ON t.report_code = f.report_code;
 
 DROP VIEW IF EXISTS v_first_kills;
@@ -316,12 +318,12 @@ LEFT JOIN report_teams t ON t.report_code = a.report_code;
 
 DROP VIEW IF EXISTS v_parses;
 CREATE VIEW v_parses AS
-SELECT ps.*, r.zone_id, z.name AS zone_name, e.name AS encounter_name, e.ord AS encounter_ord,
+SELECT ps.*, e.zone_id, z.name AS zone_name, e.name AS encounter_name, e.ord AS encounter_ord,
        f.start_time, date(f.start_time / 1000, 'unixepoch') AS kill_date, t.team
 FROM parses ps
 JOIN reports r ON r.code = ps.report_code
-JOIN zones z ON z.id = r.zone_id
 JOIN encounters e ON e.id = ps.encounter_id
+JOIN zones z ON z.id = e.zone_id
 LEFT JOIN fights f ON f.report_code = ps.report_code AND f.fight_id = ps.fight_id
 LEFT JOIN report_teams t ON t.report_code = ps.report_code;
 
@@ -344,7 +346,7 @@ TABLE_DOCS: dict[str, str] = {
     "guilds": "Every guild we know. is_home=1 is Killing Time; is_rival=1 are configured rivals; others come from the realm leaderboard.",
     "reports": "Warcraft Logs reports (one per raid night, usually) for the home guild.",
     "fights": "One row per boss pull from our logs. kill=1 for kills. fight_pct is % of the encounter remaining on a wipe.",
-    "v_pulls": "fights joined to encounter/zone names, with pull_date, duration_s and team (raid team name or NULL). Prefer this over fights.",
+    "v_pulls": "fights joined to encounter/zone names (zone_id is the boss's zone), with pull_date, duration_s and team (raid team name or NULL). Prefer this over fights.",
     "v_first_kills": "Per guild/zone/boss/difficulty: first kill time, pulls_to_kill (pulls up to and incl. the first kill; all pulls if not killed), wipes_before_kill, nights_to_kill, hours_to_kill, killed flag. Whole guild.",
     "v_team_first_kills": "Same as v_first_kills but per raid team (column team). Use when a question is about one team.",
     "report_teams": "Raid team (e.g. 'CE Team', '6 Hour Team') each report belongs to, derived from RAID_TEAMS rosters and attendance.",
