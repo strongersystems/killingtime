@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "killingtime"
-version = "0.6.0"
+version = "0.6.2"
 description = "Raid progress tracking and reporting for the guild Killing Time (Draenor EU), powered by Warcraft Logs, Raider.IO and Claude."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,7 +31,7 @@ where = ["."]
 include = ["killingtime*"]
 
 [tool.setuptools.package-data]
-killingtime = ["web/templates/*.html", "web/static/*", "web/static/vendor/*"]
+killingtime = ["web/templates/*.html", "web/static/*", "web/static/vendor/*", "web/static/members/*/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
