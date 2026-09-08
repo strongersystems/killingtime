@@ -5,6 +5,7 @@ it at the apex domain without waking the container. The same page is available l
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from datetime import UTC, datetime
@@ -128,6 +129,7 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
         "latest_kills": metrics.latest_kills(conn, limit=12),
         "raiderio": ov["raiderio"],
         "last_sync": ov["last_sync"],
+        "last_sync_run": last_sync_run(conn),
         "last_sync_ms": ov["last_sync_ms"],
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         "version": __version__,
@@ -286,6 +288,32 @@ def stated_hours(schedule: dict[str, Any], stated: str) -> dict[str, Any]:
     return {**schedule, "days": days, "stated": True,
             "hours_per_week": round(len(days) * span / 60.0, 1),
             "summary": ", ".join(d["short"] for d in days) + f" · {start}-{end} server time"}
+
+
+def last_sync_run(conn: sqlite3.Connection) -> dict[str, Any]:
+    """How the most recent sync went, including one that failed.
+
+    ``last_sync`` only moves when a sync gets far enough to write it, so a run that dies earlier leaves the site
+    quietly serving yesterday's page with nothing on the public side to say so. This puts the outcome where anyone
+    can read it without the site password."""
+    row = conn.execute(
+        "SELECT started_at, finished_at, status, detail FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return {}
+    warnings: list[str] = []
+    if row["detail"]:
+        try:
+            warnings = (json.loads(row["detail"]).get("warnings") or [])[:5]
+        except (ValueError, AttributeError):
+            warnings = []
+    return {
+        "status": row["status"],
+        "started": metrics.ms_to_date(row["started_at"]),
+        "started_ms": row["started_at"],
+        "finished_ms": row["finished_at"],
+        "running": row["finished_at"] is None,
+        "warnings": warnings,
+    }
 
 
 def guild_totals(conn: sqlite3.Connection) -> dict[str, Any]:

@@ -765,6 +765,21 @@ def test_seeded_stories_belong_to_this_guild_only(synced):
         src.write_text(original, encoding="utf-8")
 
 
+def test_the_public_api_reports_how_the_last_sync_went(synced):
+    """A sync that fails leaves the site serving an old page; the outcome has to be readable without the password."""
+    from killingtime.public import last_sync_run
+
+    conn, *_ = synced
+    assert last_sync_run(conn)["status"] in {"ok", "error"}
+
+    conn.execute("INSERT INTO sync_log(started_at, finished_at, status, detail) VALUES (?, NULL, 'error', ?)",
+                 (ms("2026-09-08"), '{"warnings": ["wcl: rate limited"]}'))
+    conn.commit()
+    run = last_sync_run(conn)
+    assert run["status"] == "error" and run["running"] is True
+    assert run["warnings"] == ["wcl: rate limited"]
+
+
 def test_a_raider_who_has_left_comes_off_the_page(synced):
     """Their nights stay in the logs and in the tier numbers; the card goes."""
     conn, *_ = synced
