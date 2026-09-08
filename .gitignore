@@ -7,7 +7,9 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .env
-data/
+# The runtime database directory at the repo root. The bundled bios under killingtime/data are source and
+# are tracked: they were invisible to git for months, so nobody could see when somebody's bio changed.
+/data/
 *.db
 *.db-wal
 *.db-shm
