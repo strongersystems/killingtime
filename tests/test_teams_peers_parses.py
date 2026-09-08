@@ -557,10 +557,10 @@ def test_kill_reel_groups_by_tier_newest_first(synced, monkeypatch, tmp_path):
     nek = next(k for k in now["kills"] if k["boss"] == "Nek'zali the Soulcoiler")
     assert nek["still"] is None and nek["date"] == "2026-08-30" and nek["current"] is True
 
-    ce = past["kills"][-1]
+    ce = past["kills"][0]  # the boss that closed the tier out leads its row
     assert ce["boss"] == "Dimensius" and ce["final"] is True and ce["ce"] is True and ce["size"] == "lg"
     assert ce["still"] == "/static/site/bosses/dimensius.webp" and ce["date"] == "2026-05-14"
-    assert all(k["size"] == "sm" for k in past["kills"][:-1])  # only the end boss gets room in an old tier
+    assert all(k["size"] == "sm" for k in past["kills"][1:])  # everything behind it is a small plate
     assert all(k["size"] == "xl" for k in now["kills"])  # ...but the tier we are on is all headline
     assert len(kill_reel(conn, settings, tiers=1)) == 1  # the cap is honoured
 
@@ -730,8 +730,19 @@ def test_seeded_stories_belong_to_this_guild_only(synced):
     raiders = {r["player_name"] for r in conn.execute(
         "SELECT DISTINCT player_name FROM v_attendance WHERE presence = 1")}
     assert set(have) <= raiders, "seeded a story for somebody who has never raided here"
-    assert seed(conn) == 0, "seeding twice must not duplicate or overwrite"
+    assert seed(conn) == 0, "seeding twice must not duplicate or rewrite what has not changed"
     assert added == len(have)
+
+    # An edit to the bundled file is deliberate, so it reaches the page on the next sync.
+    name = sorted(have)[0]
+    conn.execute("UPDATE bios SET story = 'stale' WHERE player_name = ?", (name,))
+    conn.commit()
+    assert seed(conn) == 1 and stored(conn)[name] == have[name]
+
+    # A story Claude wrote is never written back over by the bundled one.
+    conn.execute("UPDATE bios SET story = 'mine', model = 'claude-opus-5' WHERE player_name = ?", (name,))
+    conn.commit()
+    assert seed(conn) == 0 and stored(conn)[name] == "mine"
 
 
 def test_stated_raid_hours_beat_the_logs(synced):

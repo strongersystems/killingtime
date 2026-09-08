@@ -104,10 +104,11 @@ SEED_FILE = "data/stories.json"
 
 
 def seed(conn: sqlite3.Connection, progress: Any = None) -> int:
-    """Load the stories that ship with the app for any raider who has none yet.
+    """Load the stories that ship with the app, for anyone who has none and for anyone whose seeded one has changed.
 
-    Written by hand so the guild has something to read before anyone sets an Anthropic key; a generated story
-    later replaces a seeded one, and a seeded story is never written back over a generated one.
+    Written by hand so the guild has something to read before anyone sets an Anthropic key. An edit to the bundled
+    file is an edit somebody made deliberately, so it replaces the seeded copy on the next sync; a generated story
+    is never written back over, in either direction.
     """
     from pathlib import Path
 
@@ -115,24 +116,34 @@ def seed(conn: sqlite3.Connection, progress: Any = None) -> int:
     if not path.exists():
         return 0
     players = json.loads(path.read_text(encoding="utf-8")).get("players") or {}
-    have = {r["player_name"] for r in conn.execute("SELECT player_name FROM bios")}
+    have = {r["player_name"]: r["story"] for r in conn.execute(
+        "SELECT player_name, story FROM bios WHERE model = 'seed'")}
+    written = {r["player_name"] for r in conn.execute("SELECT player_name FROM bios")}
     # Only people this database has actually seen raid: the bundled set belongs to one guild, and another guild
     # running this app should not inherit our in-jokes.
     known = {r["player_name"] for r in conn.execute("SELECT DISTINCT player_name FROM v_attendance WHERE presence = 1")}
-    added = 0
+    added = changed = 0
     with transaction(conn):
         for name, entry in players.items():
-            if name in have or name not in known or not entry.get("story"):
+            story = (entry.get("story") or "").strip()
+            if name not in known or not story:
                 continue
-            conn.execute(
-                """INSERT INTO bios(player_name, story, shape, fingerprint, model, written_at)
-                   VALUES (?, ?, ?, 'seed', 'seed', ?)""",
-                (name, entry["story"].strip(), entry.get("shape"), int(time.time() * 1000)),
-            )
-            added += 1
-    if added and progress:
-        progress(f"stories: {added} seeded from the bundled set")
-    return added
+            if name in have:
+                if have[name] == story:
+                    continue
+                conn.execute("UPDATE bios SET story = ?, shape = ?, written_at = ? WHERE player_name = ?",
+                             (story, entry.get("shape"), int(time.time() * 1000), name))
+                changed += 1
+            elif name not in written:
+                conn.execute(
+                    """INSERT INTO bios(player_name, story, shape, fingerprint, model, written_at)
+                       VALUES (?, ?, ?, 'seed', 'seed', ?)""",
+                    (name, story, entry.get("shape"), int(time.time() * 1000)),
+                )
+                added += 1
+    if (added or changed) and progress:
+        progress(f"stories: {added} seeded, {changed} updated from the bundled set")
+    return added + changed
 
 
 def stored(conn: sqlite3.Connection) -> dict[str, str]:
