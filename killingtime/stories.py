@@ -100,6 +100,41 @@ def _fingerprint(facts: dict[str, Any], shape: str) -> str:
     return hashlib.sha256(json.dumps([facts, shape], sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
+SEED_FILE = "data/stories.json"
+
+
+def seed(conn: sqlite3.Connection, progress: Any = None) -> int:
+    """Load the stories that ship with the app for any raider who has none yet.
+
+    Written by hand so the guild has something to read before anyone sets an Anthropic key; a generated story
+    later replaces a seeded one, and a seeded story is never written back over a generated one.
+    """
+    from pathlib import Path
+
+    path = Path(__file__).parent / SEED_FILE
+    if not path.exists():
+        return 0
+    players = json.loads(path.read_text(encoding="utf-8")).get("players") or {}
+    have = {r["player_name"] for r in conn.execute("SELECT player_name FROM bios")}
+    # Only people this database has actually seen raid: the bundled set belongs to one guild, and another guild
+    # running this app should not inherit our in-jokes.
+    known = {r["player_name"] for r in conn.execute("SELECT DISTINCT player_name FROM v_attendance WHERE presence = 1")}
+    added = 0
+    with transaction(conn):
+        for name, entry in players.items():
+            if name in have or name not in known or not entry.get("story"):
+                continue
+            conn.execute(
+                """INSERT INTO bios(player_name, story, shape, fingerprint, model, written_at)
+                   VALUES (?, ?, ?, 'seed', 'seed', ?)""",
+                (name, entry["story"].strip(), entry.get("shape"), int(time.time() * 1000)),
+            )
+            added += 1
+    if added and progress:
+        progress(f"stories: {added} seeded from the bundled set")
+    return added
+
+
 def stored(conn: sqlite3.Connection) -> dict[str, str]:
     """Every story we hold, by player name."""
     return {r["player_name"]: r["story"] for r in conn.execute("SELECT player_name, story FROM bios")}
@@ -122,7 +157,7 @@ def write_stories(conn: sqlite3.Connection, cards: list[dict[str, Any]], setting
         facts = _facts(card)
         shape, instruction = _shape(card["player"])
         print_id = _fingerprint(facts, shape)
-        if not refresh and have.get(card["player"]) == print_id:
+        if not refresh and have.get(card["player"]) == print_id:   # "seed" never matches, so seeds get rewritten
             tally["kept"] += 1
             continue
         prompt = (f"Shape to write in - {shape}: {instruction}\n\n"

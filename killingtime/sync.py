@@ -937,6 +937,12 @@ def run_sync(
                    ORDER BY z.id DESC LIMIT 1""").fetchone()
             sync_characters(conn, rio, settings, newest["id"] if newest else None, stats, progress, retry_missing=full)
             stats.rio_requests = rio.requests_made
+        try:
+            from .stories import seed
+
+            seed(conn, progress)
+        except Exception as exc:  # noqa: BLE001 - a missing story file must never fail a sync
+            stats.warn(f"story seeding failed: {exc}", progress)
         set_meta(conn, "last_sync", str(now_ms()))
         conn.commit()
         from .state import configured, persist, publish_page

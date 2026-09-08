@@ -710,3 +710,19 @@ def test_a_written_story_reaches_the_card(synced):
     write_stories(conn, cards, settings.model_copy(update={"anthropic_api_key": "k"}), client=FakeAnthropic())
     again = metrics.meet_the_team(conn, 46, 4, min_raids=1)
     assert all(c["story"] == "A short, entirely invented story about a raider." for c in again)
+
+
+def test_seeded_stories_belong_to_this_guild_only(synced):
+    """The bundled stories are one guild's in-jokes; another guild's database must not inherit them."""
+    from killingtime.stories import seed, stored
+
+    conn, *_ = synced
+    conn.execute("DELETE FROM bios")
+    conn.commit()
+    added = seed(conn)
+    have = stored(conn)
+    raiders = {r["player_name"] for r in conn.execute(
+        "SELECT DISTINCT player_name FROM v_attendance WHERE presence = 1")}
+    assert set(have) <= raiders, "seeded a story for somebody who has never raided here"
+    assert seed(conn) == 0, "seeding twice must not duplicate or overwrite"
+    assert added == len(have)
