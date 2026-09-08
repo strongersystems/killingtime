@@ -51,10 +51,8 @@
 {% endblock %}
 {% block content %}
   <section class="hero">
-    <h1>Meet the team</h1>
-    <div class="kicker">The raiders of <span>{{ settings.name }}</span>{% if current %} · {{ current.name }}{% endif %}</div>
-    <p>Everyone with at least two raid nights this tier. Click a portrait for the full card. Bios are generated from
-      each raider's own attendance, parses and Mythic+ record; the armour and weapons are what they are wearing today.</p>
+    <h1>Roster</h1>
+    <div class="kicker">{{ settings.name }}{% if current %} · {{ current.name }}{% endif %}</div>
   </section>
 
   {% if not groups %}

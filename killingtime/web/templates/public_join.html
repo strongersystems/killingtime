@@ -38,16 +38,15 @@
     <img src="/static/site/join.webp" alt="">
     <video id="join-video" autoplay muted loop playsinline style="display:none"></video>
     <div class="inner">
-      <span class="eyebrow reveal">Recruiting · {{ settings.realm }} {{ settings.region }}</span>
-      <h1 class="reveal d1">Recruitment</h1>
-      <p class="reveal d2">{{ settings.recruiting or ("Open to strong applications on any class. Raid times, requirements and the current roster are below.") }}</p>
+      <span class="eyebrow reveal">{{ settings.realm }} {{ settings.region }}</span>
+      <h1 class="reveal d1">Recruiting</h1>
     </div>
   </div>
 
   <section>
     <div class="two">
       <div class="card reveal">
-        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">When we raid</h2>
+        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">Times</h2>
         {% if schedule.days %}
         <div class="sched">{% for d in schedule.days %}<div class="day"><b>{{ d.day }}</b><small>{{ d.start }}–{{ d.end }}</small></div>{% endfor %}</div>
         <p class="muted" style="margin-top:.7rem">Server time{% if schedule.hours_per_week %}, {{ schedule.hours_per_week|round(0)|int }} hours a week{% endif %}.
@@ -62,9 +61,8 @@
         {% endif %}
       </div>
       <div class="card reveal d1">
-        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">Who is here</h2>
-        <p class="muted" style="margin-top:0">{{ totals.raiders }} raiders, {{ totals.tiers }} tiers of logs,
-          {{ totals.pulls|num }} pulls and {{ totals.hours|num }} hours of combat on the record{% if totals.since %} since {{ totals.since }}{% endif %}.</p>
+        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">Roster</h2>
+
         <div class="sched">{% for c in recruiting.composition %}<div class="day"><b>{{ c.count }}</b><small>{{ c.label }}</small></div>{% endfor %}</div>
         {% if recruiting.portraits %}
         <div class="faces">{% for m in recruiting.portraits %}<img src="{{ m.portrait }}" alt="{{ m.player }}" title="{{ m.player }}" loading="lazy">{% endfor %}</div>
@@ -76,10 +74,10 @@
 
   <section>
     <div class="sec-head reveal" style="margin:2.2rem 0 1rem"><div>
-      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">The deal</h2></div></div>
+      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">Requirements</h2></div></div>
     <div class="two">
       <div class="card reveal">
-        <h3 style="margin-top:0">What we want from you</h3>
+        <h3 style="margin-top:0">You</h3>
         <ul class="list">
           <li>Sign up for the nights you can make, and be there for them.</li>
           <li>Come repaired, flasked and having watched the fight.</li>
@@ -88,7 +86,7 @@
         </ul>
       </div>
       <div class="card reveal d1">
-        <h3 style="margin-top:0">How we run it</h3>
+        <h3 style="margin-top:0">Us</h3>
         <ul class="list">
           <li>Two teams. If the CE nights do not suit, the six-hour team raids fewer of them.</li>
           <li>Our logs are public, including yours. Every pull is on the tracker.</li>
@@ -101,11 +99,11 @@
 
   <section>
     <div class="sec-head reveal" style="margin:2.2rem 0 1rem"><div>
-      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">How to apply</h2></div></div>
+      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">Applying</h2></div></div>
     <div class="steps">
-      <div class="step reveal"><h3>Get in touch</h3><p>{% if links.discord %}Post in the recruitment channel on our Discord.{% else %}Message an officer in game, or find us on Raider.IO.{% endif %} Say what you play and which nights suit.</p></div>
-      <div class="step reveal d1"><h3>Send logs</h3><p>Your Warcraft Logs and Raider.IO profiles.</p></div>
-      <div class="step reveal d2"><h3>Talk to an officer</h3><p>Fifteen minutes on the roster, the tier and where you would fit.</p></div>
+      <div class="step reveal"><h3>Message</h3><p>{% if links.discord %}Post in the recruitment channel on our Discord.{% else %}Message an officer in game, or find us on Raider.IO.{% endif %} Say what you play and which nights suit.</p></div>
+      <div class="step reveal d1"><h3>Logs</h3><p>Your Warcraft Logs and Raider.IO profiles.</p></div>
+      <div class="step reveal d2"><h3>Chat</h3><p>Fifteen minutes on the roster, the tier and where you would fit.</p></div>
       <div class="step reveal d3"><h3>Trial</h3><p>Two or three raid nights on whichever team suits, with feedback after each.</p></div>
     </div>
     <div class="big-cta reveal">
