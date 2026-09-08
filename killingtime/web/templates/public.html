@@ -165,7 +165,7 @@
     <div class="inner">
       <span class="eyebrow reveal">{{ guild.faction|default('', true)|capitalize }} · {{ settings.realm }} {{ settings.region }}{% if totals.years and totals.years >= 1.5 %} · {{ totals.years|round(0)|int }} years of logs{% endif %}</span>
       <h1 class="reveal d1">{{ settings.name }}</h1>
-      <p class="strap reveal d2">{{ settings.tagline or "A Horde raiding guild that has been killing bosses on Draenor since " ~ (totals.since[:4] if totals.since else "the start") ~ ". Two teams, one roster, and every pull on the record." }}</p>
+      <p class="strap reveal d2">{{ settings.tagline or ("Horde raiding guild on " ~ settings.realm ~ ". Two raid teams, " ~ totals.raiders ~ " raiders, " ~ (totals.pulls|num) ~ " pulls logged since " ~ (totals.since[:4] if totals.since else "we started") ~ ".") }}</p>
       <div class="now reveal d3">
         {% if current and current.difficulties %}
         {% set d = current.difficulties[0] %}
@@ -199,7 +199,7 @@
   {% if current %}
   <section>
     <div class="sec-head reveal">
-      <div><h2>{{ current.name }}</h2><p>{{ current.expansion }} · {{ current.bosses }} bosses · we have been in here since {{ current.first }}</p></div>
+      <div><h2>{{ current.name }}</h2><p>{{ current.expansion }} · {{ current.bosses }} bosses · first pull {{ current.first }}</p></div>
       {% if links.progress %}<a class="pill" href="{{ links.progress }}" style="padding:.5rem 1rem">Every pull, boss by boss →</a>{% endif %}
     </div>
     <div class="split">
@@ -230,7 +230,7 @@
         <div class="over">
           {% if latest_kill %}<h3>{{ latest_kill.boss }} is down</h3>
           <p class="muted" style="margin:0">{{ latest_kill.difficulty }} · {{ latest_kill.date }}{% if latest_kill.pulls %} · {{ latest_kill.pulls }} pulls{% endif %}</p>
-          {% else %}<h3>{{ current.name }}</h3><p class="muted" style="margin:0">Progress updates itself after every raid.</p>{% endif %}
+          {% else %}<h3>{{ current.name }}</h3><p class="muted" style="margin:0">No kills logged yet.</p>{% endif %}
         </div>
       </div>
     </div>
@@ -239,7 +239,7 @@
 
   {% if current and current.teams %}
   <section>
-    <div class="sec-head reveal"><div><h2>Two teams, one guild</h2><p>Pick your night. Both teams raid the same tier, at their own pace.</p></div></div>
+    <div class="sec-head reveal"><div><h2>Raid teams</h2><p>Both teams raid {{ current.name }}.</p></div></div>
     <div class="teams">
       {% for t in current.teams %}
       {# Nights are counted per difficulty and the same evening can appear in two of them, so only pulls are added up. #}
@@ -286,8 +286,8 @@
 
   <section>
     {% if kill_reel %}
-    <div class="sec-head reveal"><div><h2>Bosses we have put down</h2>
-      <p>Every one of these died to this guild. Cutting Edge kills first; hover or tap one to watch it happen.</p></div></div>
+    <div class="sec-head reveal"><div><h2>Boss kills</h2>
+      <p>Cutting Edge first.</p></div></div>
     <div class="reel">
       {% for k in kill_reel %}
       {# The first two carry the section, so they get the wide frame. #}
@@ -300,8 +300,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <div class="sec-head reveal"><div><h2>What a raid night looks like</h2>
-      <p>The pull, the charge, the heal that holds it together, the wipe, and the bit that makes it worth it.</p></div></div>
+    <div class="sec-head reveal"><div><h2>Raid nights</h2></div></div>
     <div class="reel">
       {% for c in clips %}
       <div class="clip reveal{{ ' wide' if c.wide }}{{ ' d' ~ (loop.index0 % 4) if loop.index0 % 4 }}" data-src="/static/site/{{ c.file }}.mp4">
@@ -316,7 +315,7 @@
   {% if portrait_strip %}
   <section>
     <div class="sec-head reveal">
-      <div><h2>The people who show up</h2><p>{{ portrait_strip|length }} raiders, drawn in the transmog they are wearing right now.</p></div>
+      <div><h2>Roster</h2><p>{{ portrait_strip|length }} raiders in {{ current.name if current else 'the current tier' }}.</p></div>
       <a class="pill" href="/team" style="padding:.5rem 1rem">Meet the team →</a>
     </div>
     <div class="marquee reveal">
@@ -330,37 +329,37 @@
   {% endif %}
 
   <section>
-    <div class="sec-head reveal"><div><h2>Raid with us</h2><p>What the guild looks like from the inside, and how to get in.</p></div>
+    <div class="sec-head reveal"><div><h2>Recruitment</h2></div>
       <a class="pill" href="/join" style="padding:.5rem 1rem">The full pitch →</a></div>
     <div class="recruit-grid">
       <div class="need reveal">
-        <h4>When we raid</h4>
+        <h4>Raid times</h4>
         {% if schedule.days %}
         <div class="sched">{% for d in schedule.days %}<div class="day"><b>{{ d.short }}</b><small>{{ d.start }}–{{ d.end }}</small></div>{% endfor %}</div>
-        <p style="margin-top:.6rem">{{ schedule.nights_per_week }} nights a week{% if schedule.hours_per_week %}, about {{ schedule.hours_per_week }} hours{% endif %} — measured from our own logs, not from a promise.</p>
+        <p style="margin-top:.6rem">{{ schedule.nights_per_week }} nights a week{% if schedule.hours_per_week %}, about {{ schedule.hours_per_week }} hours{% endif %}. Server time, taken from the last {{ schedule.months }} months of logs.</p>
         {% else %}<p>{{ settings.raid_times or "Ask us on Discord." }}</p>{% endif %}
       </div>
       <div class="need reveal d1">
-        <h4>Who we are short of</h4>
-        <p>{{ settings.recruiting or "Always happy to hear from strong players on any class. Tell us what you play and we will find the night that fits." }}</p>
+        <h4>Open spots</h4>
+        <p>{{ settings.recruiting or "Open to strong applications on any class. Tell us what you play and which nights suit." }}</p>
         <div class="sched">{% for c in recruiting.composition %}<div class="day"><b>{{ c.count }}</b><small>{{ c.label }}</small></div>{% endfor %}</div>
       </div>
       <div class="need reveal d2">
-        <h4>What you get</h4>
-        <p>A roster that turns up, logs that are public, and officers who can tell you exactly how many pulls a boss took
-          and where you sat on the meter. No drama, no mandatory alt runs.</p>
+        <h4>What we offer</h4>
+        <p>Two teams, so there is a night that fits. Attendance, parses and pull counts are public on the tracker,
+          including your own. No mandatory alt runs.</p>
       </div>
       <div class="need reveal d3">
-        <h4>What we ask</h4>
-        <p>Turn up, know the fight, take the feedback. {% if schedule.days %}{{ schedule.nights_per_week }} nights a week{% else %}Raid nights{% endif %},
-          consumables sorted, and a willingness to wipe {{ (current.difficulties[0].pulls // 10 * 10) if current and current.difficulties else 'a few hundred' }} times and come back the next week.</p>
+        <h4>What we expect</h4>
+        <p>{% if schedule.days %}{{ schedule.nights_per_week }} nights a week{% else %}Full attendance on raid nights{% endif %}, on time and consumed.
+          Read the fight before the pull. This tier has taken {{ (current.difficulties[0].pulls|num) if current and current.difficulties else 'several hundred' }} pulls so far.</p>
       </div>
     </div>
   </section>
 
   {% if latest_kills %}
   <section>
-    <div class="sec-head reveal"><div><h2>Recently killed</h2><p>Straight from Warcraft Logs, updated after every raid.</p></div></div>
+    <div class="sec-head reveal"><div><h2>Recent kills</h2></div></div>
     <div class="kills">
       {% for k in latest_kills[:8] %}
       <div class="kill {{ k.difficulty_name[0]|lower }}{{ ' headline' if loop.first }} reveal{{ ' d' ~ (loop.index0 % 5) if loop.index0 % 5 }}">
@@ -380,7 +379,7 @@
 
   {% if history %}
   <section>
-    <div class="sec-head reveal"><div><h2>Where we have been</h2><p>Every tier we have logs for, and what we did with it.</p></div></div>
+    <div class="sec-head reveal"><div><h2>Tier history</h2><p>{{ totals.tiers }} tiers, {{ totals.nights|num }} raid nights.</p></div></div>
     <div class="card scroll reveal">
       <table>
         <thead><tr><th>Raid</th><th>Expansion</th><th>Mythic</th><th>Heroic</th><th>Normal</th><th class="num">Mythic rank</th><th>Raided</th></tr></thead>
@@ -404,8 +403,8 @@
     <div class="final-cta reveal">
       <img src="/static/site/join.webp" alt="" loading="lazy">
       <div class="body">
-        <h2>There is a spot on the roster</h2>
-        <p>{{ settings.about or "If you want a raid team that shows up, logs everything and still finds it funny, come and talk to us." }}</p>
+        <h2>Recruiting</h2>
+        <p>{{ settings.about or ("Both teams are taking applications. Raid times, requirements and the roster are on the recruitment page.") }}</p>
         <div class="cta">
           {% if links.apply %}<a class="primary big" href="{{ links.apply }}" target="_blank" rel="noopener">Apply now</a>
           {% else %}<a class="primary big" href="/join">How to join</a>{% endif %}

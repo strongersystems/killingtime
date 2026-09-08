@@ -135,7 +135,7 @@ def test_public_site(synced, tmp_path):
     assert data["links"]["raiderio"].endswith("/eu/draenor/Killing%20Time") and data["links"]["warcraftlogs"].endswith("/637454")
     html = render_public_page(conn, settings)
     for needle in ("Killing Time", "The Venomous Abyss", "CE Team", "6 Hour Team", "Recruiting healers", "forms.example/apply",
-                   "Nek'zali the Soulcoiler", "Manaforge Omega", "Recently killed", "Bosses killed", "Raid with us"):
+                   "Nek'zali the Soulcoiler", "Manaforge Omega", "Recent kills", "Bosses killed", "Recruitment"):
         assert needle in html.replace("&#39;", "'"), needle
     assert data["schedule"]["days"] is not None and "totals" in data and "recruiting" in data
     # publishing PUTs the page to the Worker
@@ -460,7 +460,7 @@ def test_raid_schedule_and_join_page(synced):
     assert sched["nights_per_week"] == len(sched["days"]) and sched["summary"]
 
     html = render_public_join_page(conn, settings)
-    assert "Killing Time" in html and "How to apply" in html and "Come and raid" in html
+    assert "Killing Time" in html and "How to apply" in html and "Recruitment" in html
     client = TestClient(create_app(settings, conn))
     assert client.get("/public/join").status_code == 200
 

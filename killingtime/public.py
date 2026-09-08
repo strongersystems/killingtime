@@ -133,14 +133,14 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
     }
 
 
-# The fight reel on the landing page. Each entry needs <file>.webp (the poster) and, ideally, <file>.mp4 next to it
-# in static/site; a clip with no video simply stays a still, so half a set never breaks the page.
+# The generic fight reel, shown only when we have no artwork for the bosses we actually killed. Captions stay bare:
+# these are stock scenes, so a caption with a pull count in it would be inventing one.
 CLIPS = [
-    {"file": "pull", "title": "The pull", "sub": "Weapons up, everyone quiet, someone still eating.", "wide": True},
-    {"file": "kill", "title": "The kill", "sub": "Why anyone does this at all.", "wide": True},
-    {"file": "charge", "title": "The charge", "sub": "Twelve seconds of bravery, then the mechanics start."},
-    {"file": "heal", "title": "The save", "sub": "Nobody thanks the healers. The healers remember."},
-    {"file": "wipe", "title": "The wipe", "sub": "Pull 143. Back in, and again."},
+    {"file": "pull", "title": "The pull", "sub": "", "wide": True},
+    {"file": "kill", "title": "A kill", "sub": "", "wide": True},
+    {"file": "charge", "title": "The charge", "sub": ""},
+    {"file": "heal", "title": "Healing through it", "sub": ""},
+    {"file": "wipe", "title": "A wipe", "sub": ""},
 ]
 
 

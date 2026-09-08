@@ -39,20 +39,20 @@
     <video id="join-video" autoplay muted loop playsinline style="display:none"></video>
     <div class="inner">
       <span class="eyebrow reveal">Recruiting · {{ settings.realm }} {{ settings.region }}</span>
-      <h1 class="reveal d1">Come and raid</h1>
-      <p class="reveal d2">{{ settings.recruiting or "We are always open to strong players on any class. Here is exactly what raiding with " ~ settings.name ~ " looks like, in numbers we cannot fudge." }}</p>
+      <h1 class="reveal d1">Recruitment</h1>
+      <p class="reveal d2">{{ settings.recruiting or ("Open to strong applications on any class. Raid times, requirements and the current roster are below.") }}</p>
     </div>
   </div>
 
   <section>
     <div class="two">
       <div class="card reveal">
-        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">When we raid</h2>
+        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">Raid times</h2>
         {% if schedule.days %}
         <div class="sched">{% for d in schedule.days %}<div class="day"><b>{{ d.day }}</b><small>{{ d.start }}–{{ d.end }}</small></div>{% endfor %}</div>
-        <p class="muted" style="margin-top:.7rem">Worked out from {{ schedule.sample_nights }} of our own raid nights over the last
-          {{ schedule.months }} months, in server time. {{ schedule.nights_per_week }} nights a week{% if schedule.hours_per_week %},
-          about {{ schedule.hours_per_week }} hours{% endif %} — the schedule we actually keep, not the one we would like to.</p>
+        <p class="muted" style="margin-top:.7rem">Server time. {{ schedule.nights_per_week }} nights a week{% if schedule.hours_per_week %},
+          about {{ schedule.hours_per_week }} hours{% endif %}, taken from {{ schedule.sample_nights }} raid nights over the last
+          {{ schedule.months }} months.</p>
         {% else %}
         <p>{{ settings.raid_times or "Ask us on Discord and we will tell you the current nights." }}</p>
         {% endif %}
@@ -62,7 +62,7 @@
         {% endif %}
       </div>
       <div class="card reveal d1">
-        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">Who is already here</h2>
+        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">The roster</h2>
         <p class="muted" style="margin-top:0">{{ totals.raiders }} raiders, {{ totals.tiers }} tiers of logs,
           {{ totals.pulls|num }} pulls and {{ totals.hours|num }} hours of combat on the record{% if totals.since %} since {{ totals.since }}{% endif %}.</p>
         <div class="sched">{% for c in recruiting.composition %}<div class="day"><b>{{ c.count }}</b><small>{{ c.label }}</small></div>{% endfor %}</div>
@@ -76,24 +76,24 @@
 
   <section>
     <div class="sec-head reveal" style="margin:2.2rem 0 1rem"><div>
-      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">What we ask, what you get</h2></div></div>
+      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">Requirements</h2></div></div>
     <div class="two">
       <div class="card reveal">
-        <h3 style="margin-top:0">What we ask</h3>
+        <h3 style="margin-top:0">What we expect</h3>
         <ul class="list">
-          <li>Turn up. {% if schedule.days %}{{ schedule.nights_per_week }} nights a week{% else %}Raid nights{% endif %}, on time, repaired and consumed.</li>
-          <li>Know the fight before the pull, and know your own cooldowns better than we do.</li>
-          <li>Take feedback like an adult. We read the logs, and we will show you yours.</li>
-          <li>Be someone the raid wants on Discord at 23:00 on a wipe night.</li>
+          <li>{% if schedule.days %}{{ schedule.nights_per_week }} nights a week{% else %}Raid nights{% endif %}, on time, repaired and consumed.</li>
+          <li>The fight read before the pull.</li>
+          <li>Willingness to be shown your own logs after a bad night.</li>
+          <li>Discord for raid nights.</li>
         </ul>
       </div>
       <div class="card reveal d1">
-        <h3 style="margin-top:0">What you get</h3>
+        <h3 style="margin-top:0">What we offer</h3>
         <ul class="list">
-          <li>A roster that shows up, and two teams so there is a night that fits.</li>
-          <li>Everything logged and public: attendance, parses, pull counts, boss by boss.</li>
-          <li>Officers who answer "why did we wipe?" with a log link instead of an opinion.</li>
-          <li>Loot handled without drama, and no mandatory alt runs.</li>
+          <li>Two raid teams, so there is a night that fits.</li>
+          <li>Attendance, parses and pull counts public on the tracker, boss by boss.</li>
+          <li>Personal ratings only from logs.</li>
+          <li>No mandatory alt runs.</li>
         </ul>
       </div>
     </div>
@@ -101,13 +101,12 @@
 
   <section>
     <div class="sec-head reveal" style="margin:2.2rem 0 1rem"><div>
-      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">How to apply</h2>
-      <p class="muted" style="margin:.25rem 0 0">It takes about ten minutes, and someone will come back to you within a few days.</p></div></div>
+      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">How to apply</h2></div></div>
     <div class="steps">
-      <div class="step reveal"><h3>Say hello</h3><p>{% if links.discord %}Drop into our Discord and post in the recruitment channel.{% else %}Message an officer in game, or find us on Raider.IO.{% endif %} Tell us what you play and which nights work.</p></div>
-      <div class="step reveal d1"><h3>Send your logs</h3><p>A Warcraft Logs link and your Raider.IO profile. We would rather see an honest 60th percentile than a cherry-picked screenshot.</p></div>
-      <div class="step reveal d2"><h3>Have a chat</h3><p>A short conversation with an officer about the roster, the tier, and where you would fit. Ask us anything — you should be checking us out too.</p></div>
-      <div class="step reveal d3"><h3>Come and raid</h3><p>A few trial nights on the team that suits, with real feedback after each one. If it works for both sides, you are in.</p></div>
+      <div class="step reveal"><h3>Get in touch</h3><p>{% if links.discord %}Post in the recruitment channel on our Discord.{% else %}Message an officer in game, or find us on Raider.IO.{% endif %} Say what you play and which nights suit.</p></div>
+      <div class="step reveal d1"><h3>Send logs</h3><p>Your Warcraft Logs and Raider.IO profiles.</p></div>
+      <div class="step reveal d2"><h3>Talk to an officer</h3><p>Fifteen minutes on the roster, the tier and where you would fit.</p></div>
+      <div class="step reveal d3"><h3>Trial</h3><p>Two or three raid nights on whichever team suits, with feedback after each.</p></div>
     </div>
     <div class="big-cta reveal">
       <div class="cta">
