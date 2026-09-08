@@ -538,28 +538,31 @@ def test_boss_art_looks_on_disk(monkeypatch, tmp_path):
     assert art["video"] is None  # the clip is optional, and half a set must not invent the other half
 
 
-def test_kill_reel_orders_and_needs_artwork(synced, monkeypatch, tmp_path):
-    """The reel only shows bosses we have art for, never twice, and leads with a real Cutting Edge."""
+def test_kill_reel_groups_by_tier_newest_first(synced, monkeypatch, tmp_path):
+    """The wall is one row per tier, the tier we are on at the top, and every tile is sized by what the kill was."""
     from killingtime.public import kill_reel
 
     conn, *_, settings = synced
-    _art_dir(monkeypatch, tmp_path)
-    assert kill_reel(conn, settings) == []  # no artwork: nothing may reach the page
-
     # Move the Manaforge cut-off past the Dimensius kill, so that clear becomes a genuine Cutting Edge.
     conn.execute("UPDATE rio_raids SET cutoff_at = ? WHERE slug = 'manaforge-omega'", (ms("2026-06-01"),))
     conn.commit()
-    _art_dir(monkeypatch, tmp_path, "Dimensius", "Nek'zali the Soulcoiler")
-    reel = kill_reel(conn, settings)
-    slugs = [e["slug"] for e in reel]
-    assert slugs == ["dimensius", "nek-zali-the-soulcoiler"]  # CE end boss beats a more recent ordinary kill
-    assert len(slugs) == len(set(slugs)) and len(reel) <= 8
-    ce = reel[0]
-    assert ce["ce"] is True and ce["final"] is True and ce["headline"] == "Cutting Edge"
-    assert ce["sub"] == "Cutting Edge · 10 pulls · 2026-05-14" and ce["tier"] == "Manaforge Omega"
-    assert ce["still"] == "/static/site/bosses/dimensius.webp" and ce["video"] is None
-    assert reel[1]["ce"] is False and reel[1]["difficulty"] == "Mythic" and reel[1]["date"] == "2026-08-30"
-    assert len(kill_reel(conn, settings, limit=1)) == 1  # the cap is honoured
+    _art_dir(monkeypatch, tmp_path, "Dimensius")
+    groups = kill_reel(conn, settings)
+    assert [g["tier"] for g in groups] == ["The Venomous Abyss", "Manaforge Omega"]
+    now, past = groups
+    assert now["current"] is True and now["ce"] is False and past["current"] is False and past["ce"] is True
+    assert now["killed"] == len(now["kills"]) <= now["bosses"]
+
+    # A kill with no artwork still gets its plate: a name and a date beats borrowing another boss's dragon.
+    nek = next(k for k in now["kills"] if k["boss"] == "Nek'zali the Soulcoiler")
+    assert nek["still"] is None and nek["date"] == "2026-08-30" and nek["current"] is True
+
+    ce = past["kills"][-1]
+    assert ce["boss"] == "Dimensius" and ce["final"] is True and ce["ce"] is True and ce["size"] == "lg"
+    assert ce["still"] == "/static/site/bosses/dimensius.webp" and ce["date"] == "2026-05-14"
+    assert all(k["size"] == "sm" for k in past["kills"][:-1])  # only the end boss gets room in an old tier
+    assert all(k["size"] == "xl" for k in now["kills"])  # ...but the tier we are on is all headline
+    assert len(kill_reel(conn, settings, tiers=1)) == 1  # the cap is honoured
 
 
 def test_public_summary_carries_the_reel(synced, monkeypatch, tmp_path):
@@ -569,7 +572,10 @@ def test_public_summary_carries_the_reel(synced, monkeypatch, tmp_path):
     _art_dir(monkeypatch, tmp_path, "Nek'zali the Soulcoiler")
     data = public_summary(conn, settings)
     assert data["clips"] and all("file" in c for c in data["clips"])  # the fallback reel is unchanged
-    assert data["kill_reel"] and all(set(e) == keys and e["still"] for e in data["kill_reel"])
+    assert data["kill_reel"] and all(set(g) == {"tier", "tier_id", "current", "ce", "killed", "bosses", "kills"}
+                                     for g in data["kill_reel"])
+    assert all(set(e) == keys | {"current", "size"} and e["boss"] and e["date"]
+               for g in data["kill_reel"] for e in g["kills"])
     latest = data["latest_kill"]
     assert set(latest) == keys and latest["boss"] == "Nek'zali the Soulcoiler" and latest["date"] == "2026-08-30"
     assert latest["still"] == "/static/site/bosses/nek-zali-the-soulcoiler.webp"

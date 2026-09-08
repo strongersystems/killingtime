@@ -187,15 +187,18 @@ def _reel_entry(boss: str, tier: str, difficulty: str, date: str | None, pulls: 
     }
 
 
-def kill_reel(conn: sqlite3.Connection, settings: Settings, limit: int = 8) -> list[dict[str, Any]]:
-    """The kills worth a picture, best first: Cutting Edge, then other Mythic end bosses, then the current tier."""
-    ce_finals: list[tuple[int, dict]] = []
-    other_finals: list[tuple[int, dict]] = []
-    recent: list[tuple[int, dict]] = []
-    # A world-boss zone has no Raider.IO raid behind it; a one-boss raid like Sporefall does, and its Cutting Edge
-    # counts as much as any other, so filter on the mapping rather than on the boss count.
+def kill_reel(conn: sqlite3.Connection, settings: Settings, tiers: int = 6) -> list[dict[str, Any]]:
+    """Every Mythic kill we have, tier by tier, the tier we are on now at the top and the rest newest first.
+
+    The tiles are sized from the shape of the data rather than from where they land on the page: the boss that
+    closes a tier out is the one people remember, the tier in progress is the one they came to check, and
+    everything else is a small plate. A kill we have no artwork for still gets its plate - a name and a date is
+    honest, and better than borrowing another boss's dragon."""
     raid_tiers = [t for t in metrics.tiers(conn) if t["bosses"] > 1 or t.get("rio_raid_slug")]
+    groups: list[dict[str, Any]] = []
     for i, t in enumerate(raid_tiers):
+        if len(groups) >= tiers:
+            break
         s = metrics.tier_summary(conn, t["id"], 5)
         if not s["bosses"]:
             continue
@@ -203,29 +206,26 @@ def kill_reel(conn: sqlite3.Connection, settings: Settings, limit: int = 8) -> l
         # never got) a dead end boss is just a dead end boss.
         ce = bool(s["tier_over"] and s["achievement_earned"])
         tier_name = (s["zone"] or {}).get("name") or t["name"]
+        last = s["bosses"][-1]
+        entries: list[dict[str, Any]] = []
         for b in s["bosses"]:
             if not b["killed_any"] or not b["kill_ms"]:
                 continue
-            final = b is s["bosses"][-1]
-            entry = _reel_entry(b["name"], tier_name, DIFFICULTIES[5], b["kill_date"], b["pulls_to_kill"],
-                                ce=ce and final, final=final)
-            if final and ce:
-                ce_finals.append((b["kill_ms"], entry))
-            elif final:
-                other_finals.append((b["kill_ms"], entry))
-            elif i == 0:  # the tier we are on now: its ordinary kills are still news
-                recent.append((b["kill_ms"], entry))
-
-    out: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for group in (ce_finals, other_finals, recent):
-        for _, entry in sorted(group, key=lambda kv: kv[0], reverse=True):
-            # No artwork, no entry: a boss shown under someone else's dragon is worse than no picture at all.
-            if not entry["still"] or entry["slug"] in seen:
-                continue
-            seen.add(entry["slug"])
-            out.append(entry)
-    return out[:limit]
+            final = b is last
+            entries.append(_reel_entry(b["name"], tier_name, DIFFICULTIES[5], b["kill_date"], b["pulls_to_kill"],
+                                       ce=ce and final, final=final))
+        if not entries:
+            continue
+        current = i == 0
+        # The boss that closed the tier out leads its row as a banner; the rest keep raid order behind it.
+        entries.sort(key=lambda e: not e["final"])
+        rest = len(entries) - (1 if entries[0]["final"] else 0)
+        for e in entries:
+            e["current"] = current
+            e["size"] = ("lg" if e["final"] else "xl" if current and rest <= 3 else "md" if current else "sm")
+        groups.append({"tier": tier_name, "tier_id": t["id"], "current": current, "ce": ce,
+                       "killed": len(entries), "bosses": len(s["bosses"]), "kills": entries})
+    return groups
 
 
 def latest_kill(conn: sqlite3.Connection) -> dict[str, Any] | None:
