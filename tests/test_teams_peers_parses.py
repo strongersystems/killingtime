@@ -745,6 +745,17 @@ def test_seeded_stories_belong_to_this_guild_only(synced):
     assert seed(conn) == 0 and stored(conn)[name] == "mine"
 
 
+def test_a_raider_who_has_left_comes_off_the_page(synced):
+    """Their nights stay in the logs and in the tier numbers; the card goes."""
+    conn, *_ = synced
+    cur = metrics.current_tier(conn)
+    everyone = metrics.meet_the_team(conn, cur["id"], 5, min_raids=1)
+    assert everyone, "fixture has nobody to remove"
+    gone = everyone[0]["player"]
+    left = metrics.meet_the_team(conn, cur["id"], 5, min_raids=1, exclude={gone})
+    assert gone not in {c["player"] for c in left} and len(left) == len(everyone) - 1
+
+
 def test_stated_raid_hours_beat_the_logs(synced):
     """Which nights we raid comes from the logs; what time we raid is a decision the guild states."""
     from killingtime.public import public_summary, stated_hours

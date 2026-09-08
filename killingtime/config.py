@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     raid_team_min_matches: int = 2
     # Alts, which no API exposes: "Findruid: Findpal, Finddk; Norman: Normanpriest". Shown on Meet the Team.
     raid_alts: str = ""
+    # People who have left. Their nights are still in the logs and always will be, so the roster has to be told:
+    # "Basnick, Floofpin". They keep their kills in the tier numbers; they just come off Meet the Team.
+    raid_exclude: str = ""
     # Where a member's generated portrait frames live. {slug} is the lower-case name, {n} the frame number (1-5).
     # Drop five images per player anywhere reachable and the Meet the Team card animates them on hover.
     member_image_url: str = "/static/members/{slug}/{n}.webp"
@@ -148,6 +151,11 @@ class Settings(BaseSettings):
     def alts(self) -> dict[str, list[str]]:
         """{main: [alts]} from RAID_ALTS. No API links alts to a player, so this is filled in by hand."""
         return parse_raid_teams(self.raid_alts)
+
+    @property
+    def excluded(self) -> set[str]:
+        """Names from RAID_EXCLUDE: raiders who have left and should no longer have a card."""
+        return {n.strip() for n in self.raid_exclude.split(",") if n.strip()}
 
     @property
     def team_names(self) -> list[str]:

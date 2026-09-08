@@ -178,8 +178,9 @@ def cmd_stories(args: argparse.Namespace, settings: Settings) -> int:
     if not cur:
         print("no tier with our logs in it yet")
         return 1
-    cards = metrics.meet_the_team(conn, cur["id"], metrics.best_difficulty(conn, cur["id"]),
-                                  min_raids=2, alts=settings.alts, image_url=settings.member_image_url)
+    cards = metrics.meet_the_team(conn, cur["id"], metrics.best_difficulty(conn, cur["id"]), min_raids=2,
+                                  alts=settings.alts, image_url=settings.member_image_url,
+                                  exclude=settings.excluded)
     tally = write_stories(conn, cards, settings, refresh=args.refresh, limit=args.limit, progress=print)
     if args.show:
         for row in conn.execute("SELECT player_name, shape, story FROM bios ORDER BY player_name"):

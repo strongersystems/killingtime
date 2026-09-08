@@ -28,6 +28,7 @@ export interface Env {
   SITE_APPLY_URL?: string;
   SITE_DISCORD_URL?: string;
   RAID_TEAMS?: string;
+  RAID_EXCLUDE?: string;
   SYNC_EXPANSIONS?: string;
   SITE_PASSWORD?: string;
   KT_STATE_SECRET: string;
@@ -76,6 +77,7 @@ export class KTContainer extends Container<Env> {
       GUILD_REGION: env.GUILD_REGION ?? "EU",
       RIVAL_GUILDS: env.RIVAL_GUILDS ?? "",
       RAID_TEAMS: env.RAID_TEAMS ?? "",
+      RAID_EXCLUDE: env.RAID_EXCLUDE ?? "",
       SYNC_EXPANSIONS: env.SYNC_EXPANSIONS ?? "2",
       TIER_MAP: env.TIER_MAP ?? "",
       ASK_MODEL: env.ASK_MODEL ?? "claude-opus-5",

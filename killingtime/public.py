@@ -348,7 +348,7 @@ def roster_cards(conn: sqlite3.Connection, settings: Settings) -> list[dict[str,
     for team in [*teams, None] if teams else [None]:
         diff = metrics.best_difficulty(conn, zone_id, team)
         cards = metrics.meet_the_team(conn, zone_id, diff, team, min_raids=2, alts=settings.alts,
-                                      image_url=settings.member_image_url)
+                                      image_url=settings.member_image_url, exclude=settings.excluded)
         seen = {c["player"] for g in groups for c in g["members"]}
         # The configured roster leads the group; everyone else who raids with that team follows, by attendance.
         named = {metrics._slug(n): i for i, n in enumerate(settings.teams.get(team, []))} if team else {}

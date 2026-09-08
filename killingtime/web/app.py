@@ -266,7 +266,8 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
     def meet_page(request: Request, slug: str, tier: int | None = None, d: int | None = None):
         c = ctx(request, slug, tier=tier, d=d)
         with db_lock:
-            cards = metrics.meet_the_team(conn, c["zone_id"], c["difficulty"], c["team"], alts=settings.alts, image_url=settings.member_image_url) if c["zone_id"] else []
+            cards = metrics.meet_the_team(conn, c["zone_id"], c["difficulty"], c["team"], alts=settings.alts,
+                                          image_url=settings.member_image_url, exclude=settings.excluded) if c["zone_id"] else []
         return with_cookie(templates.TemplateResponse(request, "meet.html", {**c, "cards": cards}), slug)
 
     @app.get("/t/{slug}/boss/{encounter_id}", response_class=HTMLResponse)
@@ -294,8 +295,9 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
             cur = metrics.current_tier(conn)
             if not cur:
                 return {"written": 0, "kept": 0, "failed": 0, "note": "no tier to write about yet"}
-            cards = metrics.meet_the_team(conn, cur["id"], metrics.best_difficulty(conn, cur["id"]),
-                                          min_raids=2, alts=settings.alts, image_url=settings.member_image_url)
+            cards = metrics.meet_the_team(conn, cur["id"], metrics.best_difficulty(conn, cur["id"]), min_raids=2,
+                                          alts=settings.alts, image_url=settings.member_image_url,
+                                          exclude=settings.excluded)
             tally = write_stories(conn, cards, settings, refresh=bool(refresh), limit=limit)
         from ..state import configured, persist
 
@@ -322,7 +324,7 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
     def api_meet(zone_id: int, difficulty: int | None = None, team: str | None = None):
         with db_lock:
             return as_json(metrics.meet_the_team(conn, zone_id, difficulty, team, alts=settings.alts,
-                                                 image_url=settings.member_image_url))
+                                                 image_url=settings.member_image_url, exclude=settings.excluded))
 
     @app.get("/t/{slug}/nights", response_class=HTMLResponse)
     def nights_page(request: Request, slug: str, tier: int | None = None, d: int | None = None):

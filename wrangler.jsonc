@@ -21,6 +21,7 @@
     "SITE_RECRUITING": "",
     "SITE_APPLY_URL": "",
     "SITE_DISCORD_URL": "",
+    "RAID_EXCLUDE": "Basnick, Floofpin",
     "ASK_MODEL": "claude-opus-5",
     "ASK_EFFORT": "high"
   },

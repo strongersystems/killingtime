@@ -1102,7 +1102,8 @@ def role_from_spec(spec: str | None, cls: str | None, fallback: str | None) -> s
 
 def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None = None, team: str | None = None,
                    min_raids: int = 2, alts: dict[str, list[str]] | None = None,
-                   image_url: str = "/static/members/{slug}/{n}.webp") -> list[dict[str, Any]]:
+                   image_url: str = "/static/members/{slug}/{n}.webp",
+                   exclude: set[str] | None = None) -> list[dict[str, Any]]:
     """One card per raider for the Meet the Team page: their numbers, their character, a bio and a portrait prompt.
 
     Only people who actually raid this tier (``min_raids`` nights, or any parse), sorted by attendance."""
@@ -1165,10 +1166,13 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
     }
 
     cards = []
-    on_page = {p["player"] for p in data["players"]}
+    gone = exclude or set()
+    on_page = {p["player"] for p in data["players"] if p["player"] not in gone}
     for p in data["players"]:
         if (p["raids"] or 0) < min_raids and not p["kills"]:
             continue
+        if p["player"] in gone:
+            continue  # left the guild: the logs keep their nights, the page does not keep their card
         if alt_of.get(p["player"]) in on_page:
             continue   # their main is already on this page
         bosses = sorted(per_boss.get(p["player"], []), key=lambda b: b["pct"]) if p["kills"] else []
