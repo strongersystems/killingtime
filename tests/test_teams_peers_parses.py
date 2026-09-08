@@ -734,16 +734,35 @@ def test_seeded_stories_belong_to_this_guild_only(synced):
     assert seed(conn) == 0, "seeding twice must not duplicate or rewrite what has not changed"
     assert added == len(have)
 
-    # An edit to the bundled file is deliberate, so it reaches the page on the next sync.
+    # Editing the bundled text is not enough on its own: a bio somebody is already reading stays put.
     name = sorted(have)[0]
-    conn.execute("UPDATE bios SET story = 'stale' WHERE player_name = ?", (name,))
+    conn.execute("UPDATE bios SET story = 'the one on the page' WHERE player_name = ?", (name,))
     conn.commit()
-    assert seed(conn) == 1 and stored(conn)[name] == have[name]
+    assert seed(conn) == 0 and stored(conn)[name] == "the one on the page"
 
-    # A story Claude wrote is never written back over by the bundled one.
-    conn.execute("UPDATE bios SET story = 'mine', model = 'claude-opus-5' WHERE player_name = ?", (name,))
-    conn.commit()
-    assert seed(conn) == 0 and stored(conn)[name] == "mine"
+    # Raising that entry's rev is the deliberate act that replaces it, and only that entry.
+    import json as _json
+    from pathlib import Path as _Path
+
+    from killingtime import stories as _stories
+
+    src = _Path(_stories.__file__).parent / _stories.SEED_FILE
+    data = _json.loads(src.read_text(encoding="utf-8"))
+    original = src.read_text(encoding="utf-8")
+    data["players"][name]["rev"] = 9
+    src.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    try:
+        assert seed(conn) == 1 and stored(conn)[name] == have[name]
+        assert seed(conn) == 0, "the same rev must not be applied twice"
+
+        # A story Claude wrote is never written back over by the bundled one, whatever the rev says.
+        conn.execute("UPDATE bios SET story = 'mine', model = 'claude-opus-5' WHERE player_name = ?", (name,))
+        data["players"][name]["rev"] = 10
+        src.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        conn.commit()
+        assert seed(conn) == 0 and stored(conn)[name] == "mine"
+    finally:
+        src.write_text(original, encoding="utf-8")
 
 
 def test_a_raider_who_has_left_comes_off_the_page(synced):

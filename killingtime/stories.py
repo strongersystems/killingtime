@@ -104,11 +104,15 @@ SEED_FILE = "data/stories.json"
 
 
 def seed(conn: sqlite3.Connection, progress: Any = None) -> int:
-    """Load the stories that ship with the app, for anyone who has none and for anyone whose seeded one has changed.
+    """Load the stories that ship with the app for anyone who has none.
 
-    Written by hand so the guild has something to read before anyone sets an Anthropic key. An edit to the bundled
-    file is an edit somebody made deliberately, so it replaces the seeded copy on the next sync; a generated story
-    is never written back over, in either direction.
+    Written by hand so the guild has something to read before anyone sets an Anthropic key.
+
+    A story that is already on the page is left alone. Editing the bundled text does nothing on its own: a stored
+    bio is only replaced when its entry's ``rev`` is raised above the one that was stored, which has to be done
+    deliberately, one person at a time. That rule exists because the alternative - replacing every seeded bio whose
+    text no longer matches the file - rewrites people nobody asked to have rewritten. A story Claude generated is
+    never written back over at all.
     """
     from pathlib import Path
 
@@ -116,8 +120,9 @@ def seed(conn: sqlite3.Connection, progress: Any = None) -> int:
     if not path.exists():
         return 0
     players = json.loads(path.read_text(encoding="utf-8")).get("players") or {}
-    have = {r["player_name"]: r["story"] for r in conn.execute(
-        "SELECT player_name, story FROM bios WHERE model = 'seed'")}
+    # The revision a stored bio came from lives in ``fingerprint`` as "seed:N"; the bare "seed" of older rows is 1.
+    stored_rev = {r["player_name"]: _seed_rev(r["fingerprint"])
+                  for r in conn.execute("SELECT player_name, fingerprint FROM bios WHERE model = 'seed'")}
     written = {r["player_name"] for r in conn.execute("SELECT player_name FROM bios")}
     # Only people this database has actually seen raid: the bundled set belongs to one guild, and another guild
     # running this app should not inherit our in-jokes.
@@ -126,24 +131,37 @@ def seed(conn: sqlite3.Connection, progress: Any = None) -> int:
     with transaction(conn):
         for name, entry in players.items():
             story = (entry.get("story") or "").strip()
+            rev = int(entry.get("rev") or 1)
             if name not in known or not story:
                 continue
-            if name in have:
-                if have[name] == story:
+            if name in stored_rev:
+                if rev <= stored_rev[name]:
                     continue
-                conn.execute("UPDATE bios SET story = ?, shape = ?, written_at = ? WHERE player_name = ?",
-                             (story, entry.get("shape"), int(time.time() * 1000), name))
+                conn.execute(
+                    "UPDATE bios SET story = ?, shape = ?, fingerprint = ?, written_at = ? WHERE player_name = ?",
+                    (story, entry.get("shape"), f"seed:{rev}", int(time.time() * 1000), name),
+                )
                 changed += 1
             elif name not in written:
                 conn.execute(
                     """INSERT INTO bios(player_name, story, shape, fingerprint, model, written_at)
-                       VALUES (?, ?, ?, 'seed', 'seed', ?)""",
-                    (name, story, entry.get("shape"), int(time.time() * 1000)),
+                       VALUES (?, ?, ?, ?, 'seed', ?)""",
+                    (name, story, entry.get("shape"), f"seed:{rev}", int(time.time() * 1000)),
                 )
                 added += 1
     if (added or changed) and progress:
-        progress(f"stories: {added} seeded, {changed} updated from the bundled set")
+        progress(f"stories: {added} seeded, {changed} revised from the bundled set")
     return added + changed
+
+
+def _seed_rev(fingerprint: str | None) -> int:
+    """Which revision of the bundled file a stored bio came from. Rows written before revisions existed are 1."""
+    if fingerprint and fingerprint.startswith("seed:"):
+        try:
+            return int(fingerprint[5:])
+        except ValueError:
+            return 1
+    return 1
 
 
 def stored(conn: sqlite3.Connection) -> dict[str, str]:
