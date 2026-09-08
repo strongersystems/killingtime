@@ -115,6 +115,18 @@ def raid_cutoff(conn: sqlite3.Connection, raid_slug: str) -> int | None:
     return cutoff if (cutoff and cutoff <= int(datetime.now(UTC).timestamp() * 1000)) else None
 
 
+def zone_season_known(conn: sqlite3.Connection, zone_id: int) -> bool:
+    """Whether Raider.IO gives this raid a season window at all.
+
+    ``zone_cutoff`` returns None both for a season that is still running and for an older raid we simply have no
+    window for, and those two mean very different things: in the first, a kill today earns the achievement; in the
+    second, we cannot tell a progression kill from a farm kill years later."""
+    row = conn.execute(
+        "SELECT r.cutoff_at FROM zones z JOIN rio_raids r ON r.slug = z.rio_raid_slug WHERE z.id = ?", (zone_id,)
+    ).fetchone()
+    return bool(row and row["cutoff_at"])
+
+
 def zone_cutoff(conn: sqlite3.Connection, zone_id: int) -> int | None:
     """The season cut-off for a tier (ms), after which a kill earns no Cutting Edge / Ahead of the Curve.
     None while the tier is still running (a cut-off in the future, including Raider.IO's far-future placeholder for
@@ -202,6 +214,7 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
     fk, _, tf, tp = _scope(team)
     fk_team = " AND fk.team = ?" if team else ""
     cutoff = zone_cutoff(conn, zone_id)
+    season_known = bool(cutoff) or zone_season_known(conn, zone_id)
     cut_sql, cut_p = _before_cutoff(cutoff, "start_time")
     zone = conn.execute("SELECT * FROM zones WHERE id = ?", (zone_id,)).fetchone()
     bosses = _rows(
@@ -281,7 +294,10 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         "tier_over": bool(cutoff),
         # Cutting Edge (Mythic) / Ahead of the Curve (Heroic) are earned by killing the final boss before the cut-off.
         "achievement": ("Cutting Edge" if difficulty == 5 else "Ahead of the Curve" if difficulty == 4 else None),
-        "achievement_earned": earned if difficulty in (4, 5) else None,
+        # None means "we cannot say". A live season is fine - a kill today earns it - but for an older raid with no
+        # Raider.IO window a farm kill years later looks exactly like a progression kill, and claiming Cutting Edge
+        # off the back of one would be a lie.
+        "achievement_earned": (earned if season_known else None) if difficulty in (4, 5) else None,
         "total_bosses": len(bosses),
         "cleared": killed == len(bosses) and killed > 0,
         "pulls": len(pulls),
@@ -1308,7 +1324,8 @@ def raid_schedule(conn: sqlite3.Connection, team: str | None = None, months: int
     }
 
 
-def alt_candidates(conn: sqlite3.Connection, min_nights: int = 3, limit_per_main: int = 4) -> list[dict[str, Any]]:
+def alt_candidates(conn: sqlite3.Connection, min_nights: int = 3, limit_per_main: int = 4,
+                   only: set[str] | None = None, min_score: float = 0.45) -> list[dict[str, Any]]:
     """Characters that look like they belong to a raider we already know, ranked by how strong the evidence is.
 
     Nobody can play two characters on the same night, so an alt's raid nights never overlap its main's. That alone
@@ -1332,6 +1349,8 @@ def alt_candidates(conn: sqlite3.Connection, min_nights: int = 3, limit_per_main
     active = {n: ds for n, ds in nights.items() if len(ds) >= min_nights}
     out = []
     for main, main_nights in active.items():
+        if only is not None and main not in only:
+            continue
         mf, ml = first_last[main]
         cands = []
         for other, other_nights in active.items():
@@ -1358,6 +1377,7 @@ def alt_candidates(conn: sqlite3.Connection, min_nights: int = 3, limit_per_main
                 "score": round(covered * (0.5 + 0.5 * balance) * min(1.0, len(other_nights) / 10), 3),
                 "first": of, "last": ol,
             })
+        cands = [c for c in cands if c["score"] >= min_score]
         cands.sort(key=lambda c: -c["score"])
         if cands:
             out.append({"player": main, "class": classes.get(main), "nights": len(main_nights),

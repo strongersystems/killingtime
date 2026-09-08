@@ -286,10 +286,19 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
             return as_json(metrics.boss_pulls(conn, zone_id, encounter_id, difficulty, team))
 
     @app.get("/api/alts")
-    def api_alts(min_nights: int = 3):
-        """Characters that look like alts of someone already on the roster. Suggestions only - confirm in RAID_ALTS."""
+    def api_alts(min_nights: int = 3, everyone: int = 0, min_score: float = 0.45):
+        """Characters that look like alts of someone on the roster. Suggestions only - confirm them in RAID_ALTS.
+
+        Defaults to people who raid the current tier, since a list of every pairing across eight years of logs is
+        noise; pass everyone=1 for the lot."""
         with db_lock:
-            return as_json(metrics.alt_candidates(conn, min_nights=min_nights))
+            only = None
+            cur = None if everyone else metrics.current_tier(conn)
+            if cur:
+                only = {r["player_name"] for r in metrics._rows(
+                    conn, "SELECT DISTINCT player_name FROM v_attendance WHERE zone_id = ? AND presence = 1",
+                    (cur["id"],))}
+            return as_json(metrics.alt_candidates(conn, min_nights=min_nights, only=only, min_score=min_score))
 
     @app.get("/api/meet/{zone_id}")
     def api_meet(zone_id: int, difficulty: int | None = None, team: str | None = None):

@@ -22,7 +22,7 @@
     <div class="sub">{% if summary.cleared %}Cleared on {{ summary.last_kill_date }}{% elif summary.next_boss %}Working on <b><a href="{{ link(base ~ '/boss/' ~ summary.next_boss.id, tier=zone_id, d=difficulty) }}">{{ summary.next_boss.name }}</a></b>{% if summary.next_boss.best_pct is not none %} · best pull {{ summary.next_boss.best_pct|round(1) }}% left{% endif %}{% if summary.next_boss.total_pulls %} · {{ summary.next_boss.total_pulls }} pulls so far{% endif %}{% if summary.next_boss.total_pulls %} · <a href="{{ link(base ~ '/boss/' ~ summary.next_boss.id, tier=zone_id, d=difficulty) }}">pull by pull →</a>{% endif %}{% else %}No pulls yet at this difficulty{% endif %}</div>
     {% if summary.tier_over and summary.achievement %}
     <div class="sub achievement">
-      {% if summary.achievement_earned %}<span class="pill good">{{ summary.achievement }} ✓</span>{% else %}<span class="pill bad">No {{ summary.achievement }}</span>{% endif %}
+      {% if summary.achievement_earned %}<span class="pill good">{{ summary.achievement }} ✓</span>{% elif summary.achievement_earned is not none %}<span class="pill bad">No {{ summary.achievement }}</span>{% else %}<span class="pill" title="Raider.IO has no season window for this raid, so we cannot tell a progression kill from a later farm kill.">{{ summary.achievement }} unknown</span>{% endif %}
       <span class="muted">season ended {{ summary.cutoff_date }}</span>
       {% if summary.post_season_kills %}<span class="muted">· {{ summary.post_season_kills|length }} killed after: {% for k in summary.post_season_kills %}{{ k.boss }} ({{ k.date }}){{ ', ' if not loop.last }}{% endfor %} — {{ summary.killed_all_time }}/{{ summary.total_bosses }} all time</span>{% endif %}
     </div>
