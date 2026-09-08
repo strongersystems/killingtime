@@ -1318,9 +1318,14 @@ def raid_schedule(conn: sqlite3.Connection, team: str | None = None, months: int
             "end": f"{mid(ends) // 60:02d}:{mid(ends) % 60:02d}",
         })
     days.sort(key=lambda d: d["weekday"])
+    def _minutes(hhmm: str) -> int:
+        return int(hhmm[:2]) * 60 + int(hhmm[3:])
+
     hours = None
     if days:
-        span = sum((int(d["end"][:2]) * 60 + int(d["end"][3:])) - (int(d["start"][:2]) * 60 + int(d["start"][3:])) for d in days)
+        # Raids finish after midnight, so the end can be a smaller clock time than the start: 21:10 to 00:07 is
+        # three hours, not minus twenty-one.
+        span = sum((_minutes(d["end"]) - _minutes(d["start"])) % (24 * 60) for d in days)
         hours = round(span / 60.0, 1)
     return {
         "days": days,

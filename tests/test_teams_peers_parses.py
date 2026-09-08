@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import httpx
 from conftest import ms
 from fastapi.testclient import TestClient
@@ -595,3 +597,23 @@ def test_lair_bosses_are_not_part_of_the_raid(synced):
     conn.execute("UPDATE encounters SET rio_encounter_slug = NULL WHERE zone_id = 46")
     conn.commit()
     assert metrics.tier_summary(conn, 46, 4)["total_bosses"] == n + 1
+
+
+def test_raid_hours_survive_midnight():
+    """A raid that ends after midnight lasts three hours, not minus twenty-one."""
+    import datetime as dt
+    from unittest.mock import patch
+
+    rows = []
+    for week in range(4):  # four Wednesdays, 21:10 until 00:07 the next morning
+        start = dt.datetime(2026, 9, 2, 19, 10, tzinfo=UTC) + dt.timedelta(days=7 * week)  # 21:10 server time
+        rows.append({"pull_date": start.date().isoformat(), "pulls": 12,
+                     "first_ms": int(start.timestamp() * 1000),
+                     "last_ms": int((start + dt.timedelta(hours=2, minutes=57)).timestamp() * 1000)})
+
+    conn = connect(":memory:")
+    with patch.object(metrics, "_rows", return_value=rows), patch.object(metrics, "home_guild", return_value={"region": "eu"}):
+        sched = metrics.raid_schedule(conn)
+    day = sched["days"][0]
+    assert day["start"] == "21:10" and day["end"] == "00:07"  # crosses midnight in server time
+    assert sched["hours_per_week"] == 3.0 and sched["hours_per_week"] > 0
