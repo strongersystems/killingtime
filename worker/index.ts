@@ -64,6 +64,10 @@ export class KTContainer extends Container<Env> {
       KT_STATE_URL: env.PUBLIC_URL,
       KT_STATE_SECRET: env.KT_STATE_SECRET,
       KT_AUTO_SYNC: "true",
+      // The container syncs a few seconds after it starts and every two hours after that. The Worker cron does the
+      // same job, but only if it can wake a sleeping container in time; twice today it could not, and the site went
+      // half a day without republishing. A sync is guarded against running twice at once, so the two are safe together.
+      KT_SYNC_EVERY: "120",
       WCL_CLIENT_ID: env.WCL_CLIENT_ID ?? "",
       WCL_CLIENT_SECRET: env.WCL_CLIENT_SECRET ?? "",
       ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY ?? "",

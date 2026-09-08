@@ -125,6 +125,8 @@ def persist(settings: Settings, http: httpx.Client | None = None) -> bool:
         size = os.path.getsize(gz_path)
         client = http or httpx.Client(timeout=httpx.Timeout(120.0, write=600.0, read=600.0))
         try:
+            # Uploaded straight from the file: httpx reads it in chunks and sets Content-Length from its size, so
+            # the whole snapshot never has to be a bytes object in memory.
             with open(gz_path, "rb") as body:
                 resp = client.put(
                     _url(settings), content=body,
