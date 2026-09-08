@@ -747,3 +747,17 @@ def test_stated_raid_hours_beat_the_logs(synced):
 
     told = settings.model_copy(update={"site_raid_hours": "21:00-24:00"})
     assert public_summary(conn, told)["schedule"]["summary"].endswith("21:00-24:00 server time")
+
+
+def test_raiders_means_guild_members_not_everyone_ever_logged(synced):
+    """Eight years of logs hold every pug and trial who ever came along; they are not our raiders."""
+    from killingtime.public import guild_totals
+
+    conn, *_ = synced
+    conn.execute("DELETE FROM guild_members")
+    conn.execute("""INSERT INTO guild_members(name, realm_slug, region, fetched_at)
+                    SELECT DISTINCT player_name, 'draenor', 'eu', 0 FROM v_attendance WHERE presence = 1 LIMIT 2""")
+    conn.commit()
+    totals = guild_totals(conn)
+    assert totals["raiders"] == 2
+    assert totals["ever_raided"] >= totals["raiders"], "the wider number still exists, it is just not the headline"

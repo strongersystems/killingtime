@@ -267,7 +267,13 @@ def guild_totals(conn: sqlite3.Connection) -> dict[str, Any]:
                   SUM(duration_s) / 3600.0 AS hours, MIN(start_time) AS since_ms
            FROM v_pulls"""
     ).fetchone()
-    raiders = conn.execute("SELECT COUNT(DISTINCT player_name) AS n FROM v_attendance WHERE presence = 1").fetchone()
+    # Everyone who has ever appeared in one of our logs runs to a couple of thousand people - trials, pugs, guests,
+    # eight years of them. A raider is somebody the guild has on its roster who has actually raided with us.
+    raiders = conn.execute(
+        """SELECT COUNT(DISTINCT a.player_name) AS n FROM v_attendance a
+           WHERE a.presence = 1 AND EXISTS (SELECT 1 FROM guild_members m WHERE m.name = a.player_name)"""
+    ).fetchone()
+    ever = conn.execute("SELECT COUNT(DISTINCT player_name) AS n FROM v_attendance WHERE presence = 1").fetchone()
     tiers = conn.execute(
         "SELECT COUNT(*) AS n FROM zones z WHERE EXISTS (SELECT 1 FROM reports r WHERE r.zone_id = z.id)").fetchone()
     since = metrics.ms_to_date(row["since_ms"]) if row and row["since_ms"] else None
@@ -280,6 +286,7 @@ def guild_totals(conn: sqlite3.Connection) -> dict[str, Any]:
         "kills": row["kills"] if row else 0,
         "hours": round(row["hours"] or 0) if row else 0,
         "raiders": raiders["n"] if raiders else 0,
+        "ever_raided": ever["n"] if ever else 0,
         "tiers": tiers["n"] if tiers else 0,
         "since": since,
         "years": years,
