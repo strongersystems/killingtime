@@ -191,7 +191,9 @@ def kill_reel(conn: sqlite3.Connection, settings: Settings, limit: int = 8) -> l
     ce_finals: list[tuple[int, dict]] = []
     other_finals: list[tuple[int, dict]] = []
     recent: list[tuple[int, dict]] = []
-    raid_tiers = [t for t in metrics.tiers(conn) if t["bosses"] > 1]  # skip world-boss zones, as the rest of the page does
+    # A world-boss zone has no Raider.IO raid behind it; a one-boss raid like Sporefall does, and its Cutting Edge
+    # counts as much as any other, so filter on the mapping rather than on the boss count.
+    raid_tiers = [t for t in metrics.tiers(conn) if t["bosses"] > 1 or t.get("rio_raid_slug")]
     for i, t in enumerate(raid_tiers):
         s = metrics.tier_summary(conn, t["id"], 5)
         if not s["bosses"]:
