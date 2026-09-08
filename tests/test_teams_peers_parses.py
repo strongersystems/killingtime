@@ -572,8 +572,9 @@ def test_public_summary_carries_the_reel(synced, monkeypatch, tmp_path):
     _art_dir(monkeypatch, tmp_path, "Nek'zali the Soulcoiler")
     data = public_summary(conn, settings)
     assert data["clips"] and all("file" in c for c in data["clips"])  # the fallback reel is unchanged
-    assert data["kill_reel"] and all(set(g) == {"tier", "tier_id", "current", "ce", "killed", "bosses", "kills"}
-                                     for g in data["kill_reel"])
+    assert data["kill_reel"] and all(
+        set(g) == {"tier", "tier_id", "current", "ce", "killed", "bosses", "kills", "ranks"}
+        for g in data["kill_reel"])
     assert all(set(e) == keys | {"current", "size"} and e["boss"] and e["date"]
                for g in data["kill_reel"] for e in g["kills"])
     latest = data["latest_kill"]

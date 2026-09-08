@@ -187,6 +187,33 @@ def _reel_entry(boss: str, tier: str, difficulty: str, date: str | None, pulls: 
     }
 
 
+def tier_ranks(conn: sqlite3.Connection, zone_id: int, raid_slug: str | None) -> dict[str, Any]:
+    """Where the guild finished on this tier, world / region / realm.
+
+    Rank is a tier-level fact in both sources: Raider.IO ranks a guild per raid and difficulty, Warcraft Logs per
+    zone. Neither exposes a guild's rank on a single boss, so a per-boss rank would have to be made up, and is not
+    shown. Raider.IO is preferred where we have it because it is the number the guild's own armoury page quotes."""
+    rio = conn.execute(
+        """SELECT k.world_rank, k.region_rank, k.realm_rank FROM rio_rankings k JOIN guilds g ON g.id = k.guild_id
+           WHERE g.is_home = 1 AND k.raid_slug = ? AND k.difficulty = 5 AND k.realm_rank > 0""", (raid_slug or "",)
+    ).fetchone()
+    wcl = conn.execute(
+        "SELECT world_rank, region_rank, server_rank FROM wcl_zone_rankings WHERE zone_id = ? AND metric = 'progress'",
+        (zone_id,)
+    ).fetchone()
+    # Raider.IO only keeps world and region ranks for the current expansion; for older tiers it gives the realm
+    # rank and nothing else, and Warcraft Logs still has the world one. Take each number from whoever has it.
+    out = {
+        "world": (rio and rio["world_rank"]) or (wcl and wcl["world_rank"]) or None,
+        "region": (rio and rio["region_rank"]) or (wcl and wcl["region_rank"]) or None,
+        "realm": (rio and rio["realm_rank"]) or (wcl and wcl["server_rank"]) or None,
+    }
+    if not any(out.values()):
+        return {}
+    out["source"] = "Raider.IO" if rio and rio["world_rank"] else "Warcraft Logs" if wcl and wcl["world_rank"] else "Raider.IO"
+    return out
+
+
 def kill_reel(conn: sqlite3.Connection, settings: Settings, tiers: int = 6) -> list[dict[str, Any]]:
     """Every Mythic kill we have, tier by tier, the tier we are on now at the top and the rest newest first.
 
@@ -224,7 +251,8 @@ def kill_reel(conn: sqlite3.Connection, settings: Settings, tiers: int = 6) -> l
             e["current"] = current
             e["size"] = ("lg" if e["final"] else "xl" if current and rest <= 3 else "md" if current else "sm")
         groups.append({"tier": tier_name, "tier_id": t["id"], "current": current, "ce": ce,
-                       "killed": len(entries), "bosses": len(s["bosses"]), "kills": entries})
+                       "killed": len(entries), "bosses": len(s["bosses"]), "kills": entries,
+                       "ranks": tier_ranks(conn, t["id"], t.get("rio_raid_slug"))})
     return groups
 
 

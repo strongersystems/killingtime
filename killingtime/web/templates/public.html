@@ -86,6 +86,9 @@
             padding-bottom: .4rem; border-bottom: 1px solid var(--border); }
     .tier-bar b { font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; }
     .tier-bar span { font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .tier-bar .rk { margin-left: .1rem; padding: .1rem .45rem; border: 1px solid var(--border); border-radius: 999px;
+            font-size: .68rem; color: var(--ink-2); }
+    .tier-bar .rk:first-of-type { margin-left: auto; }
     .tier.now .tier-bar { border-bottom-color: rgba(232,176,74,.4); }
     .tier.now .tier-bar b { color: var(--gold); }
     .reel.wall { grid-template-columns: repeat(12, 1fr); gap: .6rem; }
@@ -329,6 +332,22 @@
   </section>
   {% endif %}
 
+  {% if portrait_strip %}
+  <section>
+    <div class="sec-head reveal">
+      <div><h2>Roster</h2></div>
+      <a class="pill" href="/team" style="padding:.5rem 1rem">All {{ portrait_strip|length }} →</a>
+    </div>
+    <div class="marquee reveal">
+      <div class="track">
+        {% for m in portrait_strip + portrait_strip %}
+        <a href="/team#{{ m.slug }}" title="{{ m.player }} · {{ m.spec }} {{ m.class }}"><img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"><span>{{ m.player }}</span></a>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
   <section>
     {% if kill_reel %}
     <div class="sec-head reveal"><div><h2>Kills</h2></div></div>
@@ -339,6 +358,10 @@
           <b>{{ g.tier }}</b>
           <span>{{ g.killed }}/{{ g.bosses }} Mythic</span>
           {% if g.ce %}<span class="pill ce">Cutting Edge</span>{% endif %}
+          {# Rank is a tier fact in both Raider.IO and Warcraft Logs; neither ranks a guild on a single boss. #}
+          {% if g.ranks.world %}<span class="rk" title="Mythic rank, {{ g.ranks.source }}">#{{ g.ranks.world|num }} world</span>{% endif %}
+          {% if g.ranks.region %}<span class="rk">#{{ g.ranks.region|num }} EU</span>{% endif %}
+          {% if g.ranks.realm %}<span class="rk">#{{ g.ranks.realm|num }} realm</span>{% endif %}
         </div>
         <div class="reel wall">
           {% for k in g.kills %}
@@ -346,7 +369,7 @@
                {% if k.video %}data-src="{{ k.video }}"{% endif %}>
             {% if k.still %}<img src="{{ k.still }}" alt="{{ k.boss }}" loading="lazy">{% endif %}
             {% if k.ce %}<span class="badge">Cutting Edge</span>{% endif %}
-            <div class="cap">{{ k.boss }}<small>{{ k.date }}</small></div>
+            <div class="cap">{{ k.boss }}<small>{{ k.date }}{% if k.pulls %} · {{ k.pulls|num }} pull{{ '' if k.pulls == 1 else 's' }}{% endif %}</small></div>
           </div>
           {% endfor %}
         </div>
@@ -366,21 +389,6 @@
     {% endif %}
   </section>
 
-  {% if portrait_strip %}
-  <section>
-    <div class="sec-head reveal">
-      <div><h2>Roster</h2></div>
-      <a class="pill" href="/team" style="padding:.5rem 1rem">All {{ portrait_strip|length }} →</a>
-    </div>
-    <div class="marquee reveal">
-      <div class="track">
-        {% for m in portrait_strip + portrait_strip %}
-        <a href="/team#{{ m.slug }}" title="{{ m.player }} · {{ m.spec }} {{ m.class }}"><img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"><span>{{ m.player }}</span></a>
-        {% endfor %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
 
   <section>
     <div class="sec-head reveal"><div><h2>Recruiting</h2></div>
