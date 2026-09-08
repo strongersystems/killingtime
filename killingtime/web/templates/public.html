@@ -333,26 +333,26 @@
       <a class="pill" href="/join" style="padding:.5rem 1rem">The full pitch →</a></div>
     <div class="recruit-grid">
       <div class="need reveal">
-        <h4>Raid times</h4>
+        <h4>When we raid</h4>
         {% if schedule.days %}
         <div class="sched">{% for d in schedule.days %}<div class="day"><b>{{ d.short }}</b><small>{{ d.start }}–{{ d.end }}</small></div>{% endfor %}</div>
-        <p style="margin-top:.6rem">{{ schedule.nights_per_week }} nights a week{% if schedule.hours_per_week %}, about {{ schedule.hours_per_week }} hours{% endif %}. Server time, taken from the last {{ schedule.months }} months of logs.</p>
+        <p style="margin-top:.6rem">Server time{% if schedule.hours_per_week %}, and about {{ schedule.hours_per_week|round(0)|int }} hours a week all in{% endif %}. We start on time and we finish on time.</p>
         {% else %}<p>{{ settings.raid_times or "Ask us on Discord." }}</p>{% endif %}
       </div>
       <div class="need reveal d1">
-        <h4>Open spots</h4>
-        <p>{{ settings.recruiting or "Open to strong applications on any class. Tell us what you play and which nights suit." }}</p>
+        <h4>Who we need</h4>
+        <p>{{ settings.recruiting or "We will look at anyone who can play, whatever the class. Tell us what you are on and which nights you can make." }}</p>
         <div class="sched">{% for c in recruiting.composition %}<div class="day"><b>{{ c.count }}</b><small>{{ c.label }}</small></div>{% endfor %}</div>
       </div>
       <div class="need reveal d2">
-        <h4>What we offer</h4>
-        <p>Two teams, so there is a night that fits. Attendance, parses and pull counts are public on the tracker,
-          including your own. No mandatory alt runs.</p>
+        <h4>How we run it</h4>
+        <p>Two teams, so if the CE nights do not work for you there is the six-hour one. Everything is logged and
+          the whole lot is public, yours included. Nobody is made to do alt runs.</p>
       </div>
       <div class="need reveal d3">
-        <h4>What we expect</h4>
-        <p>{% if schedule.days %}{{ schedule.nights_per_week }} nights a week{% else %}Full attendance on raid nights{% endif %}, on time and consumed.
-          Read the fight before the pull. This tier has taken {{ (current.difficulties[0].pulls|num) if current and current.difficulties else 'several hundred' }} pulls so far.</p>
+        <h4>What we want from you</h4>
+        <p>Turn up on the nights you signed for, know your own class better than we do, and have the patience for a
+          boss that takes a few hundred pulls. If you are being carried you will hear it from us first.</p>
       </div>
     </div>
   </section>

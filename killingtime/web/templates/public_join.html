@@ -47,12 +47,11 @@
   <section>
     <div class="two">
       <div class="card reveal">
-        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">Raid times</h2>
+        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">When we raid</h2>
         {% if schedule.days %}
         <div class="sched">{% for d in schedule.days %}<div class="day"><b>{{ d.day }}</b><small>{{ d.start }}–{{ d.end }}</small></div>{% endfor %}</div>
-        <p class="muted" style="margin-top:.7rem">Server time. {{ schedule.nights_per_week }} nights a week{% if schedule.hours_per_week %},
-          about {{ schedule.hours_per_week }} hours{% endif %}, taken from {{ schedule.sample_nights }} raid nights over the last
-          {{ schedule.months }} months.</p>
+        <p class="muted" style="margin-top:.7rem">Server time{% if schedule.hours_per_week %}, about {{ schedule.hours_per_week|round(0)|int }} hours a week{% endif %}.
+          Those are the times we actually started and finished across our last {{ schedule.sample_nights }} raids, not the ones on the recruitment post.</p>
         {% else %}
         <p>{{ settings.raid_times or "Ask us on Discord and we will tell you the current nights." }}</p>
         {% endif %}
@@ -62,7 +61,7 @@
         {% endif %}
       </div>
       <div class="card reveal d1">
-        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">The roster</h2>
+        <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">Who is here</h2>
         <p class="muted" style="margin-top:0">{{ totals.raiders }} raiders, {{ totals.tiers }} tiers of logs,
           {{ totals.pulls|num }} pulls and {{ totals.hours|num }} hours of combat on the record{% if totals.since %} since {{ totals.since }}{% endif %}.</p>
         <div class="sched">{% for c in recruiting.composition %}<div class="day"><b>{{ c.count }}</b><small>{{ c.label }}</small></div>{% endfor %}</div>
@@ -76,24 +75,24 @@
 
   <section>
     <div class="sec-head reveal" style="margin:2.2rem 0 1rem"><div>
-      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">Requirements</h2></div></div>
+      <h2 style="color:var(--ink);text-transform:none;font-size:clamp(1.4rem,3vw,2rem);letter-spacing:-.02em;margin:0">The deal</h2></div></div>
     <div class="two">
       <div class="card reveal">
-        <h3 style="margin-top:0">What we expect</h3>
+        <h3 style="margin-top:0">What we want from you</h3>
         <ul class="list">
-          <li>{% if schedule.days %}{{ schedule.nights_per_week }} nights a week{% else %}Raid nights{% endif %}, on time, repaired and consumed.</li>
-          <li>The fight read before the pull.</li>
-          <li>Willingness to be shown your own logs after a bad night.</li>
-          <li>Discord for raid nights.</li>
+          <li>Be there for the nights you signed up for, invited by the time we pull.</li>
+          <li>Come repaired, flasked and having watched the fight.</li>
+          <li>Take it well when we show you your own log.</li>
+          <li>Be in Discord. You do not have to talk.</li>
         </ul>
       </div>
       <div class="card reveal d1">
-        <h3 style="margin-top:0">What we offer</h3>
+        <h3 style="margin-top:0">How we run it</h3>
         <ul class="list">
-          <li>Two raid teams, so there is a night that fits.</li>
-          <li>Attendance, parses and pull counts public on the tracker, boss by boss.</li>
-          <li>Personal ratings only from logs.</li>
-          <li>No mandatory alt runs.</li>
+          <li>Two teams. If the CE nights do not suit, the six-hour team raids fewer of them.</li>
+          <li>Every pull we have ever logged is on the tracker, and so is every one of yours.</li>
+          <li>Bench decisions get explained, with the logs open.</li>
+          <li>Nobody is made to do alt runs.</li>
         </ul>
       </div>
     </div>
