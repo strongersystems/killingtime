@@ -12,8 +12,8 @@
     },
     "Phonchick": {
       "shape": "nature-doc",
-      "story": "She has watched the same warrior stand in the same acid for four tiers, said nothing about it, and quietly undone it every single time. That is the entire job and she is superb at it. The only thing she has ever asked for in return is an innervate, at intervals, into a channel where nobody answers. Put her in balance and she does lovely damage right up until something looks directly at her.",
-      "rev": 3
+      "story": "She has watched the same warrior stand in the same acid for four tiers, said nothing about it, and quietly undone it every single time. That is the entire job and she is superb at it. The one thing she ever asks for is an innervate, and Findruid has it on her before she has finished typing the word. Put her in balance and she does lovely damage right up until something looks directly at her.",
+      "rev": 4
     },
     "Ázteco": {
       "shape": "anecdote",
@@ -97,8 +97,8 @@
     },
     "Findruid": {
       "shape": "legend",
-      "story": "S tier, and the best player in this guild by a distance that is frankly rude, four tiers running. When a pull has completely fallen apart and one person is still upright with the boss at four percent, everybody knows who it is before they look. She has never brought a single bit of this up. Ask her about it and she will start talking about your cooldowns, which she has also noticed, and which are wrong.",
-      "rev": 4
+      "story": "S tier, and the best player in this guild by a distance that is frankly rude, four tiers running. When a pull has completely fallen apart and one person is still upright with the boss at four percent, everybody knows who it is before they look. Phonchick does not get to the end of the word innervate before it lands on her. Ask Findruid about any of this and she will start talking about your cooldowns, which she has also noticed.",
+      "rev": 5
     },
     "Nórmán": {
       "shape": "legend",
