@@ -285,6 +285,24 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
         with db_lock:
             return as_json(metrics.boss_pulls(conn, zone_id, encounter_id, difficulty, team))
 
+    @app.post("/api/stories")
+    def api_stories(refresh: int = 0, limit: int = 200):
+        """Write the Meet the Team stories. Slow and costs Anthropic tokens, so it is never part of a sync."""
+        from ..stories import write_stories
+
+        with db_lock:
+            cur = metrics.current_tier(conn)
+            if not cur:
+                return {"written": 0, "kept": 0, "failed": 0, "note": "no tier to write about yet"}
+            cards = metrics.meet_the_team(conn, cur["id"], metrics.best_difficulty(conn, cur["id"]),
+                                          min_raids=2, alts=settings.alts, image_url=settings.member_image_url)
+            tally = write_stories(conn, cards, settings, refresh=bool(refresh), limit=limit)
+        from ..state import configured, persist
+
+        if configured(settings):
+            persist(settings)   # the stories are worth keeping across a container restart
+        return tally
+
     @app.get("/api/alts")
     def api_alts(min_nights: int = 3, everyone: int = 0, min_score: float = 0.45):
         """Characters that look like alts of someone on the roster. Suggestions only - confirm them in RAID_ALTS.

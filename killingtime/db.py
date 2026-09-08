@@ -204,6 +204,33 @@ CREATE TABLE IF NOT EXISTS parses (
 );
 CREATE INDEX IF NOT EXISTS idx_parses_encounter ON parses(encounter_id, difficulty);
 
+-- One short story per raider, written by Claude from that raider's own record. Kept in the database so the guild
+-- reads the same story twice, and so a sync does not pay to rewrite sixty of them.
+CREATE TABLE IF NOT EXISTS bios (
+    player_name TEXT PRIMARY KEY,
+    story TEXT NOT NULL,
+    shape TEXT,
+    fingerprint TEXT NOT NULL,   -- hash of the facts it was written from; changes when the raider's record does
+    model TEXT,
+    written_at INTEGER NOT NULL
+);
+
+-- The guild roster as Raider.IO sees it. Wider than the raid team: it is every character in the guild, which is
+-- what lets us tell an alt of a member from a pug with a similar name.
+CREATE TABLE IF NOT EXISTS guild_members (
+    name TEXT NOT NULL,
+    realm_slug TEXT NOT NULL,
+    region TEXT NOT NULL,
+    rank INTEGER,
+    class TEXT,
+    race TEXT,
+    spec TEXT,
+    role TEXT,
+    achievement_points INTEGER,
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (name, realm_slug, region)
+);
+
 -- Character profiles from Raider.IO: race, spec, gear and the Blizzard portrait, for the Meet the Team page.
 CREATE TABLE IF NOT EXISTS characters (
     name TEXT NOT NULL,

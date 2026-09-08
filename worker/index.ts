@@ -43,7 +43,7 @@ export interface Env {
 }
 
 const CHUNK = 1024 * 1024;
-const PROTECTED = ["/ask", "/api/ask", "/sync", "/api/sync", "/status"];
+const PROTECTED = ["/ask", "/api/ask", "/sync", "/api/sync", "/api/stories", "/status"];
 const SECRET_HEADER = "X-KT-Secret";
 const MIME: Record<string, string> = {
   webp: "image/webp", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", mp4: "video/mp4",

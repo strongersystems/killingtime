@@ -244,6 +244,13 @@ RIO_PROFILES = {
 }
 
 
+# name, class, guild rank. Tagrikk and Tagripriest are Tagrik's alts; Bruk and Mira are other people.
+GUILD_ROSTER = [
+    ("Tagrik", "Warrior", 1), ("Tagrikk", "Priest", 5), ("Tagripriest", "Priest", 5),
+    ("Bruk", "Shaman", 1), ("Mira", "Druid", 1), ("Sixer", "Mage", 3), ("Vanor", "Paladin", 5),
+]
+
+
 class FakeRIO:
     def __init__(self) -> None:
         self.requests_made = 0
@@ -257,6 +264,16 @@ class FakeRIO:
             return RIO_PROFILES[name.lower()]
         except KeyError:
             raise RaiderIOError(f"guild {name} not found") from None
+
+    def guild_members(self, region, realm, name):
+        """The guild roster, including the alt army: Tagrik also plays Tagrikk and Tagripriest."""
+        self.requests_made += 1
+        self.calls.append(("members", name))
+        return [
+            {"rank": r, "character": {"name": n, "realm": "Draenor", "class": c, "race": "Orc",
+                                      "active_spec_name": "Fury", "active_spec_role": "DPS"}}
+            for n, c, r in GUILD_ROSTER
+        ]
 
     def static_data(self, expansion_id):
         self.requests_made += 1

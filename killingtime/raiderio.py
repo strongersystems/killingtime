@@ -59,6 +59,12 @@ class RaiderIOClient:
             raise RaiderIOError(f"Raider.IO HTTP {resp.status_code} for {path}: {resp.text[:200]}")
         return resp.json()
 
+    def guild_members(self, region: str, realm: str, name: str) -> list[dict]:
+        """Every character in the guild, with rank. No API links a character to an account, so this roster plus the
+        names people give their alts is the closest thing to an alt list that exists."""
+        data = self._get("/guilds/profile", {"region": region, "realm": realm, "name": name, "fields": "members"})
+        return data.get("members") or []
+
     def guild_profile(self, region: str, realm: str, name: str, fields: str = "raid_progression,raid_rankings") -> dict:
         return self._get("/guilds/profile", {"region": region, "realm": realm, "name": name, "fields": fields})
 

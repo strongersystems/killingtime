@@ -141,7 +141,8 @@
       m.pct !== null ? `<span class="pill">${Math.round(m.pct)}% attendance</span>` : "",
       m.mplus_score ? `<span class="pill">${m.mplus_score} M+</span>` : "",
     ].join(" ");
-    dlg.querySelector(".bio").innerHTML = m.bio.map((l) => `<p>${esc(l)}</p>`).join("");
+    const lines = m.story ? m.story.split(/\n{2,}/) : m.bio;
+    dlg.querySelector(".bio").innerHTML = lines.map((l) => `<p>${esc(l)}</p>`).join("");
     dlg.querySelector(".weapons").textContent = m.weapons.length ? "Carrying " + m.weapons.join(" and ") + "." : "";
     dlg.querySelector(".alts").textContent = m.alts.length ? "Also plays " + m.alts.join(", ") + "." : "";
     dlg.querySelector(".numbers").innerHTML = [

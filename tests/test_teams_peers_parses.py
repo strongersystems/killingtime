@@ -617,3 +617,96 @@ def test_raid_hours_survive_midnight():
     day = sched["days"][0]
     assert day["start"] == "21:10" and day["end"] == "00:07"  # crosses midnight in server time
     assert sched["hours_per_week"] == 3.0 and sched["hours_per_week"] > 0
+
+
+def test_alt_groups_pool_one_players_characters(synced):
+    """Nobody plays two characters at once, so a guild-mate with the same name stem who never shares a night is them."""
+    conn, *_ = synced
+    groups = metrics.alt_groups(conn)
+    assert isinstance(groups, dict)
+    for main, g in groups.items():
+        assert g["main"] == main and main not in g["alts"] and g["source"] in {"confirmed", "roster"}
+        for alt in g["alts"]:
+            shared = conn.execute(
+                """SELECT COUNT(*) AS n FROM (
+                       SELECT raid_date FROM v_attendance WHERE presence = 1 AND player_name = ?
+                       INTERSECT SELECT raid_date FROM v_attendance WHERE presence = 1 AND player_name = ?)""",
+                (main, alt)).fetchone()["n"]
+            assert shared == 0, f"{main} and {alt} raided together, so they are two people"
+
+    # A name told to us wins whatever the roster says, and pooling survives it.
+    told = metrics.alt_groups(conn, {"Tagrik": ["Mira"]})
+    assert "Mira" in told["Tagrik"]["alts"] and told["Tagrik"]["source"] == "confirmed"
+
+    # Two different people are never pooled, however similar their raid weeks.
+    assert not any("Bruk" in g["alts"] and g["main"] == "Mira" for g in groups.values())
+
+
+def test_an_alt_does_not_get_its_own_card(synced):
+    """One person, one card: an alt folds into their main rather than appearing beside them."""
+    conn, *_, settings = synced
+    cards = metrics.meet_the_team(conn, 46, 4, min_raids=1, alts={"Tagrik": ["Bruk"]})
+    names = [c["player"] for c in cards]
+    assert "Tagrik" in names and "Bruk" not in names
+    tagrik = next(c for c in cards if c["player"] == "Tagrik")
+    assert "Bruk" in tagrik["alts"] and tagrik["alts_source"] == "confirmed"
+    assert tagrik["history"]["total_raids"] >= 2  # Bruk's nights count towards Tagrik's career
+
+
+class FakeAnthropic:
+    """Stands in for the API: records what it was asked, returns a story shaped like a real one."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+        self.messages = self
+
+    def create(self, **kwargs):
+        self.prompts.append(kwargs["messages"][0]["content"])
+        block = type("B", (), {"type": "text", "text": "A short, entirely invented story about a raider."})()
+        return type("R", (), {"content": [block]})()
+
+
+def test_stories_are_written_once_and_reused(synced):
+    """A story is written from a raider's facts and kept until those facts move."""
+    from killingtime.stories import stored, write_stories
+
+    conn, *_, settings = synced
+    cards = metrics.meet_the_team(conn, 46, 4, min_raids=1)
+    settings = settings.model_copy(update={"anthropic_api_key": "test-key"})
+    client = FakeAnthropic()
+
+    first = write_stories(conn, cards, settings, client=client)
+    assert first["written"] == len(cards) and first["failed"] == 0
+    assert set(stored(conn)) == {c["player"] for c in cards}
+    assert all("Shape to write in" in p and "Write the piece" in p for p in client.prompts)
+    # the facts go in as data, and the shape differs between raiders so the page is not one joke sixty times
+    shapes = {r["shape"] for r in conn.execute("SELECT shape FROM bios")}
+    assert len(shapes) >= min(2, len(cards))
+
+    second = write_stories(conn, cards, settings, client=FakeAnthropic())
+    assert second["written"] == 0 and second["kept"] == len(cards)  # unchanged facts, no rewrite, no spend
+
+    forced = write_stories(conn, cards, settings, client=FakeAnthropic(), refresh=True)
+    assert forced["written"] == len(cards)
+
+
+def test_no_key_means_no_stories_and_the_bio_stands_in(synced):
+    """Without an Anthropic key the page falls back to the generated bio rather than showing nothing."""
+    from killingtime.stories import write_stories
+
+    conn, *_, settings = synced
+    settings = settings.model_copy(update={"anthropic_api_key": ""})
+    tally = write_stories(conn, metrics.meet_the_team(conn, 46, 4, min_raids=1), settings)
+    assert tally == {"written": 0, "kept": 0, "failed": 0}
+    card = metrics.meet_the_team(conn, 46, 4, min_raids=1)[0]
+    assert card["story"] is None and card["bio"]
+
+
+def test_a_written_story_reaches_the_card(synced):
+    from killingtime.stories import write_stories
+
+    conn, *_, settings = synced
+    cards = metrics.meet_the_team(conn, 46, 4, min_raids=1)
+    write_stories(conn, cards, settings.model_copy(update={"anthropic_api_key": "k"}), client=FakeAnthropic())
+    again = metrics.meet_the_team(conn, 46, 4, min_raids=1)
+    assert all(c["story"] == "A short, entirely invented story about a raider." for c in again)

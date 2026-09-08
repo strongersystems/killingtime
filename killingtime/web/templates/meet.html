@@ -42,7 +42,8 @@
       </div>
     </div>
 
-    <div class="bio">{% for line in p.bio %}<p>{{ line }}</p>{% endfor %}</div>
+    <div class="bio">{% if p.story %}{% for para in p.story.split('\n\n') %}<p>{{ para }}</p>{% endfor %}
+      {% else %}{% for line in p.bio %}<p>{{ line }}</p>{% endfor %}{% endif %}</div>
 
     <div class="stat-grid">
       {% for s in p.stats %}<div><span class="label">{{ s.label }}</span><b>{{ s.value }}</b></div>{% endfor %}

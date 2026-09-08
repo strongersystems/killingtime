@@ -765,6 +765,27 @@ def map_zones_to_rio(conn: sqlite3.Connection, tier_map: dict[int, str], stats: 
 def sync_raiderio(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Settings, stats: SyncStats, progress: Progress) -> None:
     home = settings.home_guild
     try:
+        try:
+            roster = rio.guild_members(home.region, home.realm_slug, home.name)
+        except RaiderIOError as exc:
+            stats.warn(f"guild roster unavailable: {exc}", progress)
+        else:
+            ts = now_ms()
+            with transaction(conn):
+                for m in roster:
+                    c = m.get("character") or {}
+                    if not c.get("name"):
+                        continue
+                    conn.execute(
+                        """INSERT OR REPLACE INTO guild_members(name, realm_slug, region, rank, class, race, spec,
+                               role, achievement_points, fetched_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (c["name"], slugify(c.get("realm") or home.realm_slug), home.region, m.get("rank"),
+                         c.get("class"), c.get("race"), c.get("active_spec_name"),
+                         (c.get("active_spec_role") or "").lower(), c.get("achievement_points"), ts),
+                    )
+            progress(f"guild roster: {len(roster)} characters")
+
         prof = rio.guild_profile(home.region, home.realm_slug, home.name)
     except RaiderIOError as exc:
         stats.warn(f"raider.io profile for {home.name} failed: {exc}", progress)

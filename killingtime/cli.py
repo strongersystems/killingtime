@@ -169,6 +169,24 @@ def cmd_report(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def cmd_stories(args: argparse.Namespace, settings: Settings) -> int:
+    """Write the Meet the Team stories. Costs Anthropic tokens, so it is a command rather than part of a sync."""
+    from .stories import write_stories
+
+    conn = connect(settings.kt_db_path)
+    cur = metrics.current_tier(conn)
+    if not cur:
+        print("no tier with our logs in it yet")
+        return 1
+    cards = metrics.meet_the_team(conn, cur["id"], metrics.best_difficulty(conn, cur["id"]),
+                                  min_raids=2, alts=settings.alts, image_url=settings.member_image_url)
+    tally = write_stories(conn, cards, settings, refresh=args.refresh, limit=args.limit, progress=print)
+    if args.show:
+        for row in conn.execute("SELECT player_name, shape, story FROM bios ORDER BY player_name"):
+            print(f"\n--- {row['player_name']} ({row['shape']}) ---\n{row['story']}")
+    return 0 if not tally["failed"] else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="kt", description="Killing Time raid progress tracker")
     p.add_argument("--verbose", "-v", action="store_true", help="debug logging")
@@ -193,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("question", nargs="+")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_ask)
+
+    s = sub.add_parser("stories", help="write the Meet the Team bios with Claude")
+    s.add_argument("--refresh", action="store_true", help="rewrite every story, not only the changed ones")
+    s.add_argument("--limit", type=int, default=200)
+    s.add_argument("--show", action="store_true", help="print the stories afterwards")
+    s.set_defaults(fn=cmd_stories)
 
     s = sub.add_parser("report", help="print a text progress report")
     s.add_argument("--zone", type=int, help="Warcraft Logs zone id (default: current tier)")

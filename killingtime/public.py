@@ -342,7 +342,8 @@ def roster_cards(conn: sqlite3.Connection, settings: Settings) -> list[dict[str,
                 "generated": bool(frames),
                 "profile_url": c["profile_url"],
                 "weapons": c["weapons"],
-                "bio": c["bio"][:5],   # the public page wants a paragraph, not a dossier
+                "story": c.get("story"),
+                "bio": c["bio"][:5],   # the fallback when nobody has written them a story yet
                 "stats": c["stats"],
                 "pct": c["pct"], "raids": c["raids"], "avg": c["avg"], "best": c["best"],
                 "mplus_score": round(c["mplus_score"]) if c["mplus_score"] else None,

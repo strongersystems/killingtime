@@ -1109,6 +1109,7 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
     import json as _json
 
     from . import flavour
+    from .stories import stored
 
     home = home_guild(conn)
     guild_name = home["name"] if home else ""
@@ -1116,7 +1117,12 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
     zone = conn.execute("SELECT name, rio_raid_slug FROM zones WHERE id = ?", (zone_id,)).fetchone()
     zone_slug = zone["rio_raid_slug"] if zone else None
     data = roster(conn, zone_id, difficulty, team)
-    alts = alts or {}
+    stories = stored(conn)
+    # RAID_ALTS is somebody telling us; the guild roster gives us the rest. One person gets one card.
+    groups = alt_groups(conn, alts or {})
+    alts = {g["main"]: g["alts"] for g in groups.values()}
+    alt_of = {a: g["main"] for g in groups.values() for a in g["alts"]}
+    alt_source = {g["main"]: g["source"] for g in groups.values()}
     # Characters are keyed by name: a guild member may be on another realm, and names are unique within a raid.
     chars = {r["name"]: r for r in _rows(conn, "SELECT * FROM characters WHERE missing = 0")}
     history = merge_alt_history(career_history(conn), alts)
@@ -1159,9 +1165,12 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
     }
 
     cards = []
+    on_page = {p["player"] for p in data["players"]}
     for p in data["players"]:
         if (p["raids"] or 0) < min_raids and not p["kills"]:
             continue
+        if alt_of.get(p["player"]) in on_page:
+            continue   # their main is already on this page
         bosses = sorted(per_boss.get(p["player"], []), key=lambda b: b["pct"]) if p["kills"] else []
         c = chars.get(p["player"], {})
         card = {
@@ -1203,8 +1212,11 @@ def meet_the_team(conn: sqlite3.Connection, zone_id: int, difficulty: int | None
         card["career_avg"] = round(ct["avg_pct"], 1) if ct and ct["avg_pct"] is not None else None
         card["career_bosses"] = ct["bosses"] if ct else 0
         card["alts"] = alts.get(p["player"], [])
+        card["alts_source"] = alt_source.get(p["player"])
         card["stats"] = flavour.stats(card)
         card["bio"] = flavour.bio(card)
+        # A written story beats the templated bio wherever we have one; the bio stays as the fallback.
+        card["story"] = stories.get(p["player"])
         prompts = flavour.portrait_prompts(card, guild_name, realm, zone["name"] if zone else None)
         card["portrait_prompts"] = prompts
         card["portrait_prompt"] = prompts[0]["prompt"]
@@ -1335,6 +1347,105 @@ def raid_schedule(conn: sqlite3.Connection, team: str | None = None, months: int
         "sample_nights": sum(len(v) for v in nights.values()),
         "months": months,
     }
+
+
+def _stem_match(a: str, b: str) -> bool:
+    """Whether two character names look like the same person naming their alts.
+
+    No API links characters to an account - Blizzard deliberately does not publish it - so the evidence is what
+    people call their alts: Viamisolocky and Viamisosalty, Abeed and Abedd, Bassdruid and Basspally. Deliberately
+    strict, because merging two different people is a worse error than missing an alt: a shared five-letter start,
+    a short name inside a longer one, or a single typo's distance apart.
+    """
+    if a == b:
+        return False
+    common = 0
+    for x, y in zip(a, b, strict=False):
+        if x != y:
+            break
+        common += 1
+    if common >= 4:
+        return True
+    if len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a)):
+        return True
+    if abs(len(a) - len(b)) <= 1 and min(len(a), len(b)) >= 4:
+        # one substitution, insertion or deletion apart
+        short, long = (a, b) if len(a) <= len(b) else (b, a)
+        i = j = edits = 0
+        while i < len(short) and j < len(long):
+            if short[i] == long[j]:
+                i += 1
+                j += 1
+                continue
+            edits += 1
+            if edits > 1:
+                return False
+            if len(short) == len(long):
+                i += 1
+            j += 1
+        return edits + (len(long) - j) + (len(short) - i) <= 1
+    return False
+
+
+def alt_groups(conn: sqlite3.Connection, confirmed: dict[str, list[str]] | None = None) -> dict[str, dict[str, Any]]:
+    """Pool each raider's characters into one person: {main: {"main", "alts", "source"}}.
+
+    Two sources, and only two. ``confirmed`` is RAID_ALTS, which is somebody telling us. The other is the guild
+    roster: two characters in the same guild whose names come from the same stem, who have never raided on the
+    same night - nobody plays two characters at once - are treated as one player. The character with the most
+    raid nights becomes the main, since that is the one the guild knows them by.
+    """
+    members = {r["name"] for r in _rows(conn, "SELECT name FROM guild_members")}
+    nights: dict[str, set[str]] = {}
+    for r in _rows(conn, "SELECT player_name, raid_date FROM v_attendance WHERE presence = 1"):
+        nights.setdefault(r["player_name"], set()).add(r["raid_date"])
+
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    source: dict[str, str] = {}
+    for main, alts in (confirmed or {}).items():
+        for alt in alts:
+            union(main, alt)
+            source[_slug(alt)] = "confirmed"
+
+    # Only characters we have actually seen raid are worth pooling, and only if the guild has them on its roster.
+    seen = sorted(n for n in nights if n in members)
+    folded = {n: _slug(n).replace("-", "") for n in seen}
+    for i, a in enumerate(seen):
+        for b in seen[i + 1:]:
+            if nights[a] & nights[b]:
+                continue   # they raided together, so they are two people
+            if max(len(nights[a]), len(nights[b])) < 3:
+                continue   # two near-strangers who never met proves nothing; leave them apart
+            if _stem_match(folded[a], folded[b]):
+                union(a, b)
+                source.setdefault(_slug(b), "roster")
+                source.setdefault(_slug(a), "roster")
+
+    groups: dict[str, list[str]] = {}
+    for name in {*parent, *seen}:
+        groups.setdefault(find(name), []).append(name)
+    out: dict[str, dict[str, Any]] = {}
+    for members_of in groups.values():
+        if len(members_of) < 2:
+            continue
+        main = max(members_of, key=lambda n: (len(nights.get(n, ())), n))
+        alts = sorted(n for n in members_of if n != main)
+        out[main] = {"main": main, "alts": alts,
+                     "source": "confirmed" if any(source.get(_slug(a)) == "confirmed" for a in alts) else "roster"}
+    return out
 
 
 def alt_candidates(conn: sqlite3.Connection, min_nights: int = 3, limit_per_main: int = 4,
