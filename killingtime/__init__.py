@@ -1,3 +1,3 @@
 """Killing Time - guild raid progress tracking and reporting."""
 
-__version__ = "0.15.2"
+__version__ = "0.15.3"
