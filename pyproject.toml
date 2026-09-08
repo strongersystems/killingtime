@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "killingtime"
-version = "0.9.2"
+version = "0.9.3"
 description = "Raid progress tracking and reporting for the guild Killing Time (Draenor EU), powered by Warcraft Logs, Raider.IO and Claude."
 readme = "README.md"
 requires-python = ">=3.11"
