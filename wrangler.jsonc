@@ -26,7 +26,7 @@
   "containers": [
     {
       "class_name": "KTContainer",
-      "image": "registry.cloudflare.com/384aa06186c222d84150bd145c97c25d/killingtime:0.8.0",
+      "image": "registry.cloudflare.com/384aa06186c222d84150bd145c97c25d/killingtime:0.8.1",
       "max_instances": 1,
       "instance_type": "basic"
     }
