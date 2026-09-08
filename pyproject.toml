@@ -31,7 +31,7 @@ where = ["."]
 include = ["killingtime*"]
 
 [tool.setuptools.package-data]
-killingtime = ["web/templates/*.html", "web/static/*", "web/static/vendor/*", "web/static/members/*/*", "web/static/site/*"]
+killingtime = ["web/templates/*.html", "web/static/*", "web/static/vendor/*", "web/static/members/*/*", "web/static/site/*", "web/static/site/bosses/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

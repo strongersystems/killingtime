@@ -69,7 +69,7 @@
     </div>
     <div class="roster">
       {% for m in g.members %}
-      <div class="tile" tabindex="0" role="button" aria-label="{{ m.player }}" data-member="{{ m.slug }}">
+      <div class="tile" id="{{ m.slug }}" tabindex="0" role="button" aria-label="{{ m.player }}" data-member="{{ m.slug }}">
         <div class="art">
           {% if m.portrait %}<img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"
                onerror="this.remove();this.closest('.tile').classList.add('empty');">{% endif %}
@@ -151,6 +151,8 @@
       ["With us since", m.since ? `<span style="font-size:.85rem">${m.since}</span>` : "—"],
     ].map(([l, v]) => `<div><span class="label">${l}</span><b>${v}</b></div>`).join("");
     dots.innerHTML = m.frames.length > 1 ? m.frames.map((_, n) => `<i class="${n === 0 ? "on" : ""}"></i>`).join("") : "";
+    // Replace rather than push, so a browse through the roster does not bury the Back button.
+    history.replaceState(null, "", "#" + m.slug);
     if (m.frames.length > 1 && !reduced) {
       dtimer = setInterval(() => {
         di = (di + 1) % m.frames.length;
@@ -158,14 +160,29 @@
         [...dots.children].forEach((d, n) => d.classList.toggle("on", n === di));
       }, 500);
     }
-    dlg.showModal();
+    if (!dlg.open) dlg.showModal();
   }
   function num(v) { return v === null || v === undefined ? "—" : Math.round(v); }
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
-  dlg.addEventListener("close", () => { clearInterval(dtimer); dtimer = null; });
+  dlg.addEventListener("close", () => {
+    clearInterval(dtimer);
+    dtimer = null;
+    history.replaceState(null, "", location.pathname + location.search);
+  });
   dlg.querySelector(".close").addEventListener("click", () => dlg.close());
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });   // click the backdrop
+
+  // /team#slug, as linked from the portrait marquee on the landing page, opens that raider straight away.
+  function fromHash() {
+    const m = byslug[decodeURIComponent(location.hash.slice(1))];
+    if (!m) return;
+    const tile = document.getElementById(m.slug);
+    if (tile) tile.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+    open(m);
+  }
+  fromHash();
+  addEventListener("hashchange", fromHash);
 })();
 </script>
   {% endif %}

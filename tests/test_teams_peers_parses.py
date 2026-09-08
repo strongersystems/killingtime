@@ -491,3 +491,101 @@ def test_alt_candidates_and_merge(synced):
     assert merged[main]["tier_count"] >= history[main]["tier_count"]
     assert merged[main]["alt_characters"] == [alt]
     assert merged[alt] == history[alt]  # the alt's own row is left alone
+
+
+def test_achievement_unknown_without_a_season_window(synced):
+    """A raid with no Raider.IO season window cannot claim Cutting Edge off a farm kill years later."""
+    conn, *_ = synced
+    assert metrics.zone_season_known(conn, 44) is True   # a closed season we have the dates for
+    assert metrics.tier_summary(conn, 44, 5)["achievement_earned"] is False
+    assert metrics.zone_season_known(conn, 46) is True   # live season: a kill today still earns it
+    assert metrics.tier_summary(conn, 46, 4)["achievement_earned"] is True
+
+    conn.execute("UPDATE rio_raids SET cutoff_at = NULL, ends_at = NULL WHERE slug = 'manaforge-omega'")
+    conn.commit()
+    assert metrics.zone_season_known(conn, 44) is False
+    s = metrics.tier_summary(conn, 44, 5)
+    assert s["achievement_earned"] is None and s["tier_over"] is False
+
+
+def _make_boss_art(*names: str) -> list:
+    """Drop artwork next to the real thing for the length of a test; returns the paths to clean up."""
+    from pathlib import Path
+
+    import killingtime.public as public
+
+    art = Path(public.__file__).parent / "web" / "static" / "site" / "bosses"
+    art.mkdir(parents=True, exist_ok=True)
+    made = []
+    for name in names:
+        p = art / f"{metrics._slug(name)}.webp"
+        p.write_bytes(b"RIFFfake")
+        made.append(p)
+    return made
+
+
+def _clean_boss_art(made: list) -> None:
+    for p in made:
+        p.unlink(missing_ok=True)
+    parent = made[0].parent if made else None
+    if parent and parent.exists() and not any(parent.iterdir()):
+        parent.rmdir()
+
+
+def test_boss_art_looks_on_disk():
+    """A boss only gets a picture if we actually generated one; a made-up slug never yields a URL."""
+    from killingtime.public import boss_art
+
+    assert boss_art("no-such-boss-at-all") == {"still": None, "video": None}
+    assert boss_art("") == {"still": None, "video": None}
+    made = _make_boss_art("Dimensius")
+    try:
+        art = boss_art("dimensius")
+        assert art["still"] == "/static/site/bosses/dimensius.webp"
+        assert art["video"] is None  # the clip is optional, and half a set must not invent the other half
+    finally:
+        _clean_boss_art(made)
+
+
+def test_kill_reel_orders_and_needs_artwork(synced):
+    """The reel only shows bosses we have art for, never twice, and leads with a real Cutting Edge."""
+    from killingtime.public import kill_reel
+
+    conn, *_, settings = synced
+    assert kill_reel(conn, settings) == []  # no artwork on disk yet: nothing may reach the page
+
+    # Move the Manaforge cut-off past the Dimensius kill, so that clear becomes a genuine Cutting Edge.
+    conn.execute("UPDATE rio_raids SET cutoff_at = ? WHERE slug = 'manaforge-omega'", (ms("2026-06-01"),))
+    conn.commit()
+    made = _make_boss_art("Dimensius", "Nek'zali the Soulcoiler")
+    try:
+        reel = kill_reel(conn, settings)
+        slugs = [e["slug"] for e in reel]
+        assert slugs == ["dimensius", "nek-zali-the-soulcoiler"]  # CE end boss beats a more recent ordinary kill
+        assert len(slugs) == len(set(slugs)) and len(reel) <= 8
+        ce = reel[0]
+        assert ce["ce"] is True and ce["final"] is True and ce["headline"] == "Cutting Edge"
+        assert ce["sub"] == "Cutting Edge · 10 pulls · 2026-05-14" and ce["tier"] == "Manaforge Omega"
+        assert ce["still"] == "/static/site/bosses/dimensius.webp" and ce["video"] is None
+        assert reel[1]["ce"] is False and reel[1]["difficulty"] == "Mythic" and reel[1]["date"] == "2026-08-30"
+        assert len(kill_reel(conn, settings, limit=1)) == 1  # the cap is honoured
+    finally:
+        _clean_boss_art(made)
+
+
+def test_public_summary_carries_the_reel(synced):
+    """The landing page gets per-boss art data, and the generic clip reel stays untouched beside it."""
+    conn, *_, settings = synced
+    keys = {"boss", "slug", "tier", "difficulty", "date", "pulls", "ce", "final", "still", "video", "headline", "sub"}
+    made = _make_boss_art("Nek'zali the Soulcoiler")
+    try:
+        data = public_summary(conn, settings)
+        assert data["clips"] and all("file" in c for c in data["clips"])  # the fallback reel is unchanged
+        assert data["kill_reel"] and all(set(e) == keys and e["still"] for e in data["kill_reel"])
+        latest = data["latest_kill"]
+        assert set(latest) == keys and latest["boss"] == "Nek'zali the Soulcoiler" and latest["date"] == "2026-08-30"
+        assert latest["still"] == "/static/site/bosses/nek-zali-the-soulcoiler.webp"
+    finally:
+        _clean_boss_art(made)
+    # With the art gone the kill is still reported, just without a picture for the caption.
+    assert public_summary(conn, settings)["latest_kill"]["still"] is None

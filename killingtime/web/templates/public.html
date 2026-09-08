@@ -84,12 +84,63 @@
     .sched .day { border: 1px solid var(--border); border-radius: 10px; padding: .5rem .8rem; background: rgba(255,255,255,.03); }
     .sched .day b { display: block; font-size: .95rem; }
     .sched .day small { color: var(--muted); }
-    .kill-list { display: grid; gap: .5rem; }
-    .kill-row { display: flex; align-items: center; gap: .8rem; border: 1px solid var(--border); border-radius: 12px;
-            padding: .6rem .9rem; background: var(--surface-2); }
-    .kill-row .when { color: var(--muted); font-size: .82rem; min-width: 88px; font-variant-numeric: tabular-nums; }
-    .kill-row .boss { font-weight: 700; }
-    .kill-row .meta { margin-left: auto; color: var(--muted); font-size: .82rem; }
+    /* ---- raid teams -------------------------------------------------------------------------------- */
+    .teams { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .team-card { position: relative; display: flex; flex-direction: column; gap: .85rem; overflow: hidden;
+            background: linear-gradient(165deg, rgba(232,176,74,.08), transparent 48%), var(--surface-2);
+            transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+    .team-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px;
+            background: linear-gradient(90deg, var(--gold), transparent 70%); }
+    .team-card:hover { transform: translateY(-4px); border-color: var(--gold); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
+    .team-card .top { display: flex; align-items: start; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+    .team-card h3 { margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: -.02em; }
+    .team-card .tag { font-size: .68rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); font-weight: 700; }
+    /* Static so the pseudo-element stretches over the whole card and makes it one big click target. */
+    .team-card .go { position: static; font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; }
+    .team-card .go::after { content: ""; position: absolute; inset: 0; }
+    .team-card .score { display: flex; align-items: baseline; gap: .7rem; }
+    .team-card .score b { font-size: clamp(2.6rem, 7vw, 3.4rem); font-weight: 900; line-height: .85; letter-spacing: -.045em;
+            font-variant-numeric: tabular-nums; }
+    .team-card .score span { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+            color: var(--muted); max-width: 7rem; line-height: 1.25; }
+    .tbars { display: grid; gap: .75rem; }
+    .tbar .label { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; font-size: .74rem;
+            font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .tbar .label b { font-size: .95rem; font-variant-numeric: tabular-nums; }
+    .tbar .bar { margin-top: .3rem; }
+    .tbar .sub { font-size: .8rem; color: var(--ink-2); margin-top: .3rem; }
+    /* The fill grows once the card has revealed itself, so the bars read as progress rather than furniture. */
+    .team-card .bar > span { width: 0; transition: width 1.1s cubic-bezier(.2,.7,.2,1) .2s; }
+    .team-card.in .bar > span { width: var(--w); }
+    .team-card .state { border-top: 1px solid var(--border); padding-top: .7rem; font-size: .92rem; color: var(--ink-2); }
+    .team-card .state b { color: var(--ink); }
+    .team-card .recent { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; font-size: .85rem; }
+    .team-card .recent li { display: flex; align-items: baseline; gap: .5rem; }
+    .team-card .recent .d { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: .78rem; }
+
+    /* ---- recently killed --------------------------------------------------------------------------- */
+    .kills { position: relative; display: grid; gap: .5rem; }
+    .kills::before { content: ""; position: absolute; left: 15px; top: 1rem; bottom: 1rem; width: 2px;
+            background: linear-gradient(to bottom, var(--gold), rgba(255,255,255,.14) 18%, rgba(255,255,255,.04)); }
+    .kill { display: grid; grid-template-columns: 32px 1fr; align-items: center; }
+    .kill.m { --c: var(--mythic); } .kill.h { --c: var(--heroic); } .kill.n { --c: var(--normal); }
+    .kill i { justify-self: center; width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--muted));
+            box-shadow: 0 0 0 4px var(--bg), 0 0 0 5px rgba(255,255,255,.08); }
+    .kill .body { position: relative; display: flex; align-items: baseline; gap: .55rem; flex-wrap: wrap; overflow: hidden;
+            border: 1px solid var(--border); border-left: 3px solid var(--c, var(--border)); border-radius: 12px;
+            background: var(--surface-2); padding: .55rem .85rem; transition: transform .2s ease, border-color .2s ease; }
+    .kill .body::after { content: ""; position: absolute; inset: 0; background: var(--c); opacity: .05; pointer-events: none; }
+    .kill:hover .body { transform: translateX(3px); border-color: var(--border); border-left-color: var(--c); }
+    .kill .boss { font-weight: 700; }
+    .kill .zone { color: var(--muted); font-size: .85rem; }
+    .kill .meta { margin-left: auto; color: var(--ink-2); font-size: .82rem; font-variant-numeric: tabular-nums; }
+    .kill.lead i { width: 13px; height: 13px; }
+    .kill.lead .body { padding: 1rem 1.1rem; border-left-width: 4px; box-shadow: 0 14px 34px rgba(0,0,0,.45); }
+    .kill.lead .body::after { opacity: .09; }
+    .kill.lead .boss { font-size: clamp(1.3rem, 3.6vw, 1.9rem); letter-spacing: -.02em; width: 100%; }
+    .kill.lead .zone, .kill.lead .meta { font-size: .9rem; }
+    .kill .new { font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--gold); }
+    @media (max-width: 480px) { .kill .meta { margin-left: 0; } }
     .final-cta { position: relative; margin-top: 2.5rem; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
     .final-cta img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .final-cta .body { position: relative; padding: 2.6rem 1.5rem; text-align: center;
@@ -97,6 +148,10 @@
     .final-cta h2 { color: var(--ink); font-size: clamp(1.5rem, 4vw, 2.4rem); text-transform: none; letter-spacing: -.02em; margin: 0 0 .4rem; }
     .final-cta p { color: var(--ink-2); margin: 0 auto 1.2rem; max-width: 52ch; }
     .final-cta .cta { justify-content: center; }
+    @media (prefers-reduced-motion: reduce) {
+      .team-card, .team-card .bar > span, .kill .body { transition: none; }
+      .team-card:hover { transform: none; } .kill:hover .body { transform: none; }
+    }
 {% endblock %}
 {% block content %}
   <div class="lead">
@@ -182,15 +237,42 @@
     <div class="sec-head reveal"><div><h2>Two teams, one guild</h2><p>Pick your night. Both teams raid the same tier, at their own pace.</p></div></div>
     <div class="teams">
       {% for t in current.teams %}
-      <div class="card team reveal d{{ loop.index }}">
-        <h3>{{ t.team }} <span class="tag">{{ current.name }}</span></h3>
-        {% for d in t.difficulties %}
-        <div class="row"><span><span class="pill {{ d.name[0]|lower }}">{{ d.name }}</span></span>
-          <span><b>{{ d.killed }}/{{ d.total }}</b>{% if d.cleared %} · cleared {{ d.last_kill_date }}{% elif d.next_boss %} · on {{ d.next_boss }}{% if d.next_best_pct is not none %} ({{ d.next_best_pct|round(1) }}%){% endif %}{% endif %}</span>
-          <span class="muted">{{ d.pulls|num }} pulls</span></div>
-        {% else %}
-        <p class="muted">No logged pulls in this tier yet.</p>
-        {% endfor %}
+      {# Nights are counted per difficulty and the same evening can appear in two of them, so only pulls are added up. #}
+      {% set ns = namespace(kills=0, pulls=0, working=none) %}
+      {% for d in t.difficulties %}
+        {% set ns.kills = ns.kills + d.killed %}{% set ns.pulls = ns.pulls + d.pulls %}
+        {% if ns.working is none and not d.cleared and d.next_boss %}{% set ns.working = d %}{% endif %}
+      {% endfor %}
+      <div class="card team-card reveal d{{ loop.index }}">
+        <div class="top">
+          <div><h3>{{ t.team }}</h3><div class="tag">{{ current.name }}</div></div>
+          {% if links.progress %}<a class="go" href="{{ links.progress }}/t/{{ t.team|lower|replace(' ', '-') }}/">Team tracker →</a>{% endif %}
+        </div>
+        <div class="score"><b data-count="{{ ns.kills }}">0</b><span>boss kills this tier</span></div>
+        <div class="tbars">
+          {% for d in t.difficulties %}
+          <div class="tbar {{ d.name[0]|lower }}">
+            <div class="label"><span>{{ d.name }}</span><b>{{ d.killed }}/{{ d.total }}</b></div>
+            <div class="bar"><span style="--w: {{ (100 * d.killed / d.total)|round(1) if d.total else 0 }}%"></span></div>
+            <div class="sub">{{ d.pulls|num }} pull{{ 's' if d.pulls != 1 }} over {{ d.nights }} night{{ 's' if d.nights != 1 }}{% if d.cleared %} · cleared {{ d.last_kill_date }}{% endif %}</div>
+          </div>
+          {% else %}
+          <p class="muted">No logged pulls in this tier yet.</p>
+          {% endfor %}
+        </div>
+        {% if ns.working %}
+        <div class="state">Working on <b>{{ ns.working.next_boss }}</b>{% if ns.working.next_best_pct is not none %} · best pull <b>{{ ns.working.next_best_pct|round(1) }}%</b>{% endif %}
+          · {{ ns.pulls|num }} pulls in the tier</div>
+        {% elif t.difficulties %}
+        <div class="state">Nothing left standing on {{ t.difficulties[0].name }} · <b>{{ ns.pulls|num }}</b> pulls in the tier</div>
+        {% endif %}
+        {% if t.latest_kills %}
+        <ul class="recent">
+          {% for k in t.latest_kills[:3] %}
+          <li><span class="pill {{ k.difficulty_name[0]|lower }}">{{ k.difficulty_name[0] }}</span><span>{{ k.boss }}</span><span class="d">{{ k.date }}</span></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
@@ -219,7 +301,7 @@
     <div class="marquee reveal">
       <div class="track">
         {% for m in portrait_strip + portrait_strip %}
-        <a href="/team" title="{{ m.player }} · {{ m.spec }} {{ m.class }}"><img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"><span>{{ m.player }}</span></a>
+        <a href="/team#{{ m.slug }}" title="{{ m.player }} · {{ m.spec }} {{ m.class }}"><img src="{{ m.portrait }}" alt="{{ m.player }}" loading="lazy"><span>{{ m.player }}</span></a>
         {% endfor %}
       </div>
     </div>
@@ -258,14 +340,17 @@
   {% if latest_kills %}
   <section>
     <div class="sec-head reveal"><div><h2>Recently killed</h2><p>Straight from Warcraft Logs, updated after every raid.</p></div></div>
-    <div class="kill-list">
+    <div class="kills">
       {% for k in latest_kills[:8] %}
-      <div class="kill-row reveal{{ ' d' ~ (loop.index0 % 5) if loop.index0 % 5 }}">
-        <span class="when">{{ k.date }}</span>
-        <span class="pill {{ k.difficulty_name[0]|lower }}">{{ k.difficulty_name[0] }}</span>
-        <span class="boss">{{ k.boss }}</span>
-        <span class="muted">{{ k.zone_name }}</span>
-        <span class="meta">{% if k.pulls %}{{ k.pulls }} pulls{% endif %}{% if k.team %} · {{ k.team }}{% endif %}</span>
+      <div class="kill {{ k.difficulty_name[0]|lower }}{{ ' lead' if loop.first }} reveal{{ ' d' ~ (loop.index0 % 5) if loop.index0 % 5 }}">
+        <i></i>
+        <div class="body">
+          {% if loop.first %}<span class="new">Latest kill</span>{% endif %}
+          <span class="pill {{ k.difficulty_name[0]|lower }}">{{ k.difficulty_name }}</span>
+          <span class="boss">{{ k.boss }}</span>
+          <span class="zone">{{ k.zone_name }}</span>
+          <span class="meta">{{ k.date }}{% if k.pulls %} · {{ k.pulls|num }} pull{{ 's' if k.pulls != 1 }}{% endif %}{% if k.team %} · {{ k.team }}{% endif %}</span>
+        </div>
       </div>
       {% endfor %}
     </div>

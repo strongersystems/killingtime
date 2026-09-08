@@ -105,7 +105,7 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
         {"player": m["player"], "slug": m["slug"], "portrait": m["portrait"], "spec": m["spec"], "class": m["class"]}
         for g in roster_cards(conn, settings) for m in g["members"] if m["generated"]
     ]
-    history = [tier_block(t) for t in raid_tiers[1:6]]
+    history = [tier_block(t) for t in raid_tiers[1:10]]
     return {
         "guild": ov["guild"],
         "settings": {
@@ -117,6 +117,8 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
         "teams": teams,
         "schedule": schedule,
         "clips": site_clips(),
+        "kill_reel": kill_reel(conn, settings),
+        "latest_kill": latest_kill(conn),
         "portrait_strip": strip,
         "recruiting": recruiting_block(conn, settings, current, schedule, strip),
         "totals": guild_totals(conn),
@@ -146,6 +148,90 @@ def site_clips() -> list[dict[str, Any]]:
     """Only offer a clip whose poster actually exists on disk."""
     static = Path(__file__).parent / "web" / "static" / "site"
     return [c for c in CLIPS if (static / f"{c['file']}.webp").exists()]
+
+
+def boss_art(slug: str) -> dict[str, str | None]:
+    """The generated artwork for one boss, if it has been made yet: still and clip are independent."""
+    static = Path(__file__).parent / "web" / "static" / "site" / "bosses"
+    if not slug:
+        return {"still": None, "video": None}
+    out: dict[str, str | None] = {}
+    for key, ext in (("still", "webp"), ("video", "mp4")):
+        out[key] = f"/static/site/bosses/{slug}.{ext}" if (static / f"{slug}.{ext}").exists() else None
+    return out
+
+
+def _reel_entry(boss: str, tier: str, difficulty: str, date: str | None, pulls: int | None,
+                ce: bool, final: bool) -> dict[str, Any]:
+    """One kill as the gallery wants it. Every word of ``sub`` comes from the logs; nothing is dressed up."""
+    slug = metrics._slug(boss)
+    art = boss_art(slug)
+    bits = ["Cutting Edge" if ce else difficulty]
+    if pulls:
+        bits.append(f"{pulls} pull{'' if pulls == 1 else 's'}")
+    if date:
+        bits.append(date)
+    return {
+        "boss": boss, "slug": slug, "tier": tier, "difficulty": difficulty, "date": date,
+        "pulls": int(pulls) if pulls else None, "ce": ce, "final": final,
+        "still": art["still"], "video": art["video"],
+        "headline": "Cutting Edge" if ce else "Final boss down" if final else f"{difficulty} kill",
+        "sub": " · ".join(bits),
+    }
+
+
+def kill_reel(conn: sqlite3.Connection, settings: Settings, limit: int = 8) -> list[dict[str, Any]]:
+    """The kills worth a picture, best first: Cutting Edge, then other Mythic end bosses, then the current tier."""
+    ce_finals: list[tuple[int, dict]] = []
+    other_finals: list[tuple[int, dict]] = []
+    recent: list[tuple[int, dict]] = []
+    raid_tiers = [t for t in metrics.tiers(conn) if t["bosses"] > 1]  # skip world-boss zones, as the rest of the page does
+    for i, t in enumerate(raid_tiers):
+        s = metrics.tier_summary(conn, t["id"], 5)
+        if not s["bosses"]:
+            continue
+        # Cutting Edge is only a fact once the season has closed; on a live tier (or one whose season dates we
+        # never got) a dead end boss is just a dead end boss.
+        ce = bool(s["tier_over"] and s["achievement_earned"])
+        tier_name = (s["zone"] or {}).get("name") or t["name"]
+        for b in s["bosses"]:
+            if not b["killed_any"] or not b["kill_ms"]:
+                continue
+            final = b is s["bosses"][-1]
+            entry = _reel_entry(b["name"], tier_name, DIFFICULTIES[5], b["kill_date"], b["pulls_to_kill"],
+                                ce=ce and final, final=final)
+            if final and ce:
+                ce_finals.append((b["kill_ms"], entry))
+            elif final:
+                other_finals.append((b["kill_ms"], entry))
+            elif i == 0:  # the tier we are on now: its ordinary kills are still news
+                recent.append((b["kill_ms"], entry))
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in (ce_finals, other_finals, recent):
+        for _, entry in sorted(group, key=lambda kv: kv[0], reverse=True):
+            # No artwork, no entry: a boss shown under someone else's dragon is worse than no picture at all.
+            if not entry["still"] or entry["slug"] in seen:
+                continue
+            seen.add(entry["slug"])
+            out.append(entry)
+    return out[:limit]
+
+
+def latest_kill(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """The most recent first kill, shaped like a reel entry so the page can caption it with matching art."""
+    rows = metrics.latest_kills(conn, limit=1)
+    if not rows:
+        return None
+    k = rows[0]
+    last_ord = conn.execute("SELECT MAX(ord) AS ord FROM encounters WHERE zone_id = ?", (k["zone_id"],)).fetchone()
+    final = bool(last_ord and last_ord["ord"] is not None and k["encounter_ord"] == last_ord["ord"])
+    ce = False
+    if final and k["difficulty"] == 5:
+        s = metrics.tier_summary(conn, k["zone_id"], 5)
+        ce = bool(s["tier_over"] and s["achievement_earned"])
+    return _reel_entry(k["boss"], k["zone_name"], k["difficulty_name"], k["date"], k["pulls"], ce=ce, final=final)
 
 
 def guild_totals(conn: sqlite3.Connection) -> dict[str, Any]:
