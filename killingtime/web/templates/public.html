@@ -491,34 +491,60 @@
   v.addEventListener("error", () => v.remove(), { once: true });
 })();
 
-// The reel: each tile is a poster until it scrolls into view, then it quietly plays its own clip on a loop.
+// The reel. A tile is a poster until something asks for the clip, and only a few clips are ever alive at once:
+// the wall can hold thirty of them, browsers run out of video decoders long before that, and the ones over the
+// limit fail silently, which looked like "only the big ones work".
 (function () {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const c = navigator.connection || {};
   const cheap = c.saveData || /2g/.test(c.effectiveType || "");
   const tiles = [...document.querySelectorAll(".clip[data-src]")];
   if (!tiles.length) return;
+  const MAX_LIVE = 4;
+  const live = [];
+
+  const detach = (tile) => {
+    const i = live.indexOf(tile);
+    if (i >= 0) live.splice(i, 1);
+    const v = tile.querySelector("video");
+    if (v) { v.pause(); v.removeAttribute("src"); v.load(); v.remove(); }
+    delete tile.dataset.loaded;
+  };
+
   const attach = (tile) => {
     if (tile.dataset.loaded) return tile.querySelector("video");
+    while (live.length >= MAX_LIVE) detach(live[0]);
     tile.dataset.loaded = "1";
     const v = document.createElement("video");
     v.muted = true; v.loop = true; v.playsInline = true; v.preload = "none";
     v.src = tile.dataset.src;
-    v.addEventListener("error", () => v.remove(), { once: true });
+    v.addEventListener("error", () => detach(tile), { once: true });
     tile.appendChild(v);
+    live.push(tile);
     return v;
   };
-  tiles.forEach((tile) => {
-    tile.addEventListener("mouseenter", () => { const v = attach(tile); if (v) v.play().catch(() => {}); });
-    tile.addEventListener("click", () => { const v = attach(tile); if (v) v.play().catch(() => {}); });
-  });
-  if (reduced || cheap || !window.IntersectionObserver) return;
-  const io = new IntersectionObserver((es) => es.forEach((e) => {
-    const v = e.isIntersecting ? attach(e.target) : e.target.querySelector("video");
+
+  const play = (tile) => {
+    const v = attach(tile);
     if (!v) return;
-    if (e.isIntersecting) v.play().catch(() => {}); else v.pause();
+    const i = live.indexOf(tile);          // most recently asked for, so the oldest is the one reclaimed
+    if (i >= 0) { live.splice(i, 1); live.push(tile); }
+    v.play().catch(() => {});
+  };
+
+  tiles.forEach((tile) => {
+    tile.addEventListener("mouseenter", () => play(tile));
+    tile.addEventListener("click", () => play(tile));
+  });
+
+  if (reduced || cheap || !window.IntersectionObserver) return;
+  // Only the big tiles start by themselves. A row of eight small plates would take every decoder going and the
+  // banners would be the ones left as stills; a plate plays when you point at it or tap it.
+  const io = new IntersectionObserver((es) => es.forEach((e) => {
+    if (e.isIntersecting) play(e.target);
+    else { const v = e.target.querySelector("video"); if (v) v.pause(); }
   }), { threshold: 0.35 });
-  tiles.forEach((t) => io.observe(t));
+  tiles.filter((t) => t.matches(".lg, .xl, .md, .wide")).forEach((t) => io.observe(t));
 })();
 </script>
 {% endblock %}
