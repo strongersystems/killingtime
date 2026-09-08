@@ -91,7 +91,8 @@
             transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
     .team-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px;
             background: linear-gradient(90deg, var(--gold), transparent 70%); }
-    .team-card:hover { transform: translateY(-4px); border-color: var(--gold); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
+    /* Only lift the card when there is a tracker to click through to, so the hover is never a promise of nothing. */
+    .team-card:has(.go):hover { transform: translateY(-4px); border-color: var(--gold); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
     .team-card .top { display: flex; align-items: start; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
     .team-card h3 { margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: -.02em; }
     .team-card .tag { font-size: .68rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); font-weight: 700; }
@@ -134,11 +135,11 @@
     .kill .boss { font-weight: 700; }
     .kill .zone { color: var(--muted); font-size: .85rem; }
     .kill .meta { margin-left: auto; color: var(--ink-2); font-size: .82rem; font-variant-numeric: tabular-nums; }
-    .kill.lead i { width: 13px; height: 13px; }
-    .kill.lead .body { padding: 1rem 1.1rem; border-left-width: 4px; box-shadow: 0 14px 34px rgba(0,0,0,.45); }
-    .kill.lead .body::after { opacity: .09; }
-    .kill.lead .boss { font-size: clamp(1.3rem, 3.6vw, 1.9rem); letter-spacing: -.02em; width: 100%; }
-    .kill.lead .zone, .kill.lead .meta { font-size: .9rem; }
+    .kill.headline i { width: 13px; height: 13px; }
+    .kill.headline .body { padding: 1rem 1.1rem; border-left-width: 4px; box-shadow: 0 14px 34px rgba(0,0,0,.45); }
+    .kill.headline .body::after { opacity: .09; }
+    .kill.headline .boss { font-size: clamp(1.3rem, 3.6vw, 1.9rem); letter-spacing: -.02em; width: 100%; }
+    .kill.headline .zone, .kill.headline .meta { font-size: .9rem; }
     .kill .new { font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--gold); }
     @media (max-width: 480px) { .kill .meta { margin-left: 0; } }
     .final-cta { position: relative; margin-top: 2.5rem; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
@@ -150,7 +151,7 @@
     .final-cta .cta { justify-content: center; }
     @media (prefers-reduced-motion: reduce) {
       .team-card, .team-card .bar > span, .kill .body { transition: none; }
-      .team-card:hover { transform: none; } .kill:hover .body { transform: none; }
+      .team-card:has(.go):hover { transform: none; } .kill:hover .body { transform: none; }
     }
 {% endblock %}
 {% block content %}
@@ -342,7 +343,7 @@
     <div class="sec-head reveal"><div><h2>Recently killed</h2><p>Straight from Warcraft Logs, updated after every raid.</p></div></div>
     <div class="kills">
       {% for k in latest_kills[:8] %}
-      <div class="kill {{ k.difficulty_name[0]|lower }}{{ ' lead' if loop.first }} reveal{{ ' d' ~ (loop.index0 % 5) if loop.index0 % 5 }}">
+      <div class="kill {{ k.difficulty_name[0]|lower }}{{ ' headline' if loop.first }} reveal{{ ' d' ~ (loop.index0 % 5) if loop.index0 % 5 }}">
         <i></i>
         <div class="body">
           {% if loop.first %}<span class="new">Latest kill</span>{% endif %}

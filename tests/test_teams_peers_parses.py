@@ -589,3 +589,23 @@ def test_public_summary_carries_the_reel(synced):
         _clean_boss_art(made)
     # With the art gone the kill is still reported, just without a picture for the caption.
     assert public_summary(conn, settings)["latest_kill"]["still"] is None
+
+
+def test_lair_bosses_are_not_part_of_the_raid(synced):
+    """Warcraft Logs files lair bosses in the raid's zone; Raider.IO, the armory and the guild do not count them."""
+    conn, *_ = synced
+    before = metrics.tier_summary(conn, 46, 4)
+    n = before["total_bosses"]
+    conn.execute(
+        """INSERT INTO encounters(id, zone_id, name, ord, rio_encounter_slug)
+           VALUES (99001, 46, 'Some Lair Boss', 99, NULL)""")
+    conn.commit()
+    after = metrics.tier_summary(conn, 46, 4)
+    assert after["total_bosses"] == n, "an encounter Raider.IO's raid does not have is not one of the raid's bosses"
+    assert "Some Lair Boss" not in [b["name"] for b in after["bosses"]]
+    assert [t for t in metrics.tiers(conn) if t["id"] == 46][0]["bosses"] == n
+
+    # A tier we hold no Raider.IO mapping for keeps every boss: there, the mapping tells us nothing at all.
+    conn.execute("UPDATE encounters SET rio_encounter_slug = NULL WHERE zone_id = 46")
+    conn.commit()
+    assert metrics.tier_summary(conn, 46, 4)["total_bosses"] == n + 1

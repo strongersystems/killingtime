@@ -16,6 +16,14 @@ from zoneinfo import ZoneInfo
 from .db import CODE_TO_RIO_DIFFICULTY, DIFFICULTIES
 
 DAY_MS = 86_400_000
+# Warcraft Logs files a tier's lair and world bosses in the same zone as the raid, but they are not part of it:
+# Raider.IO, the armory and the guild all count The Venomous Abyss as eight bosses while Warcraft Logs lists nine.
+# A boss belongs to the raid if Raider.IO's raid has it; if none of the zone's bosses map (older tiers we have no
+# Raider.IO data for) we keep the lot, because then the mapping tells us nothing.
+RAID_BOSS_SQL = """(e.rio_encounter_slug IS NOT NULL
+                    OR NOT EXISTS (SELECT 1 FROM encounters x
+                                   WHERE x.zone_id = e.zone_id AND x.rio_encounter_slug IS NOT NULL))"""
+
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 RAID_DIFFS = (5, 4, 3)
 
@@ -147,7 +155,7 @@ def tiers(conn: sqlite3.Connection, team: str | None = None) -> list[dict[str, A
         conn,
         f"""
         SELECT z.id, z.name, z.frozen, z.rio_raid_slug, x.name AS expansion,
-               (SELECT COUNT(*) FROM encounters e WHERE e.zone_id = z.id) AS bosses,
+               (SELECT COUNT(*) FROM encounters e WHERE e.zone_id = z.id AND {RAID_BOSS_SQL}) AS bosses,
                z.rio_raid_slug AS slug
         FROM zones z LEFT JOIN expansions x ON x.id = z.expansion_id
         WHERE EXISTS (SELECT 1 FROM reports r {team_join} WHERE r.zone_id = z.id)
@@ -222,7 +230,7 @@ def tier_summary(conn: sqlite3.Connection, zone_id: int, difficulty: int, team: 
         f"""SELECT e.id, e.name, e.ord, e.rio_encounter_slug, fk.killed, fk.first_kill_time, fk.first_kill_date
             FROM encounters e
             LEFT JOIN {fk} fk ON fk.encounter_id = e.id AND fk.difficulty = ?{fk_team}
-            WHERE e.zone_id = ? ORDER BY e.ord""",
+            WHERE e.zone_id = ? AND {RAID_BOSS_SQL} ORDER BY e.ord""",
         (difficulty, *tp, zone_id),
     )
     rio = rio_kills_for_zone(conn, zone_id, difficulty) if not team else {}
