@@ -726,3 +726,24 @@ def test_seeded_stories_belong_to_this_guild_only(synced):
     assert set(have) <= raiders, "seeded a story for somebody who has never raided here"
     assert seed(conn) == 0, "seeding twice must not duplicate or overwrite"
     assert added == len(have)
+
+
+def test_stated_raid_hours_beat_the_logs(synced):
+    """Which nights we raid comes from the logs; what time we raid is a decision the guild states."""
+    from killingtime.public import public_summary, stated_hours
+
+    conn, *_, settings = synced
+    derived = metrics.raid_schedule(conn, months=24)
+    assert derived["days"] and not derived.get("stated")
+
+    stated = stated_hours(derived, "21:00-24:00")
+    assert [d["day"] for d in stated["days"]] == [d["day"] for d in derived["days"]]  # the nights are unchanged
+    assert all(d["start"] == "21:00" and d["end"] == "24:00" for d in stated["days"])
+    assert stated["hours_per_week"] == 3.0 * len(stated["days"]) and stated["stated"] is True
+    assert stated["summary"].endswith("21:00-24:00 server time")
+
+    assert stated_hours(derived, "") == derived           # nothing stated, nothing changed
+    assert stated_hours(derived, "whenever") == derived   # and nothing we cannot parse
+
+    told = settings.model_copy(update={"site_raid_hours": "21:00-24:00"})
+    assert public_summary(conn, told)["schedule"]["summary"].endswith("21:00-24:00 server time")

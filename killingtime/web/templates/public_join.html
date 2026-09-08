@@ -50,8 +50,9 @@
         <h2 style="color:var(--ink);text-transform:none;letter-spacing:-.01em">When we raid</h2>
         {% if schedule.days %}
         <div class="sched">{% for d in schedule.days %}<div class="day"><b>{{ d.day }}</b><small>{{ d.start }}–{{ d.end }}</small></div>{% endfor %}</div>
-        <p class="muted" style="margin-top:.7rem">Server time{% if schedule.hours_per_week %}, about {{ schedule.hours_per_week|round(0)|int }} hours a week{% endif %}.
-          Those are the times we actually started and finished across our last {{ schedule.sample_nights }} raids, not the ones on the recruitment post.</p>
+        <p class="muted" style="margin-top:.7rem">Server time{% if schedule.hours_per_week %}, {{ schedule.hours_per_week|round(0)|int }} hours a week{% endif %}.
+          {% if schedule.stated %}Invites go out a few minutes before the hour and we pull on time.
+          {% else %}Those are the times we actually started and finished across our last {{ schedule.sample_nights }} raids.{% endif %}</p>
         {% else %}
         <p>{{ settings.raid_times or "Ask us on Discord and we will tell you the current nights." }}</p>
         {% endif %}
@@ -80,9 +81,9 @@
       <div class="card reveal">
         <h3 style="margin-top:0">What we want from you</h3>
         <ul class="list">
-          <li>Be there for the nights you signed up for, invited by the time we pull.</li>
+          <li>Sign up for the nights you can make, and be there for them.</li>
           <li>Come repaired, flasked and having watched the fight.</li>
-          <li>Take it well when we show you your own log.</li>
+          <li>Be willing to go through your own logs with an officer.</li>
           <li>Be in Discord. You do not have to talk.</li>
         </ul>
       </div>
@@ -90,7 +91,7 @@
         <h3 style="margin-top:0">How we run it</h3>
         <ul class="list">
           <li>Two teams. If the CE nights do not suit, the six-hour team raids fewer of them.</li>
-          <li>Every pull we have ever logged is on the tracker, and so is every one of yours.</li>
+          <li>Our logs are public, including yours. Every pull is on the tracker.</li>
           <li>Bench decisions get explained, with the logs open.</li>
           <li>Nobody is made to do alt runs.</li>
         </ul>

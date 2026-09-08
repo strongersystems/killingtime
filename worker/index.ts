@@ -23,6 +23,7 @@ export interface Env {
   SITE_TAGLINE?: string;
   SITE_ABOUT?: string;
   SITE_RAID_TIMES?: string;
+  SITE_RAID_HOURS?: string;
   SITE_RECRUITING?: string;
   SITE_APPLY_URL?: string;
   SITE_DISCORD_URL?: string;
@@ -79,6 +80,7 @@ export class KTContainer extends Container<Env> {
       SITE_TAGLINE: env.SITE_TAGLINE ?? "",
       SITE_ABOUT: env.SITE_ABOUT ?? "",
       SITE_RAID_TIMES: env.SITE_RAID_TIMES ?? "",
+      SITE_RAID_HOURS: env.SITE_RAID_HOURS ?? "",
       SITE_RECRUITING: env.SITE_RECRUITING ?? "",
       SITE_APPLY_URL: env.SITE_APPLY_URL ?? "",
       SITE_DISCORD_URL: env.SITE_DISCORD_URL ?? "",

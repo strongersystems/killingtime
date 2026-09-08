@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     site_tagline: str = ""
     site_about: str = ""
     site_raid_times: str = ""
+    # The window the guild actually advertises, e.g. "21:00-24:00". When set it replaces the times worked out from
+    # the logs: the median start of a pull is a few minutes after the raid begins, which is not what people mean
+    # when they ask what time you raid.
+    site_raid_hours: str = ""
     site_recruiting: str = ""  # e.g. "Recruiting: 1 healer, ranged DPS"
     site_apply_url: str = ""
     site_discord_url: str = ""

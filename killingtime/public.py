@@ -5,6 +5,7 @@ it at the apex domain without waking the container. The same page is available l
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -100,7 +101,7 @@ def public_summary(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
         }
 
     current = tier_block(raid_tiers[0]) if raid_tiers else None
-    schedule = metrics.raid_schedule(conn)
+    schedule = stated_hours(metrics.raid_schedule(conn), settings.site_raid_hours)
     strip = [
         {"player": m["player"], "slug": m["slug"], "portrait": m["portrait"], "spec": m["spec"], "class": m["class"]}
         for g in roster_cards(conn, settings) for m in g["members"] if m["generated"]
@@ -240,6 +241,23 @@ def latest_kill(conn: sqlite3.Connection) -> dict[str, Any] | None:
         s = metrics.tier_summary(conn, k["zone_id"], 5)
         ce = bool(s["tier_over"] and s["achievement_earned"])
     return _reel_entry(k["boss"], k["zone_name"], k["difficulty_name"], k["date"], k["pulls"], ce=ce, final=final)
+
+
+def stated_hours(schedule: dict[str, Any], stated: str) -> dict[str, Any]:
+    """Replace the times worked out from the logs with the window the guild advertises.
+
+    Which nights we raid is a fact the logs know better than anyone. What time we raid is a decision, and the logs
+    only see when the first pull happened to go out."""
+    m = re.match(r"^\s*(\d{1,2}:\d{2})\s*(?:-|to|\u2013|\u2014)\s*(\d{1,2}:\d{2})\s*$", stated or "")
+    if not m or not schedule.get("days"):
+        return schedule
+    start, end = m.group(1), m.group(2)
+    minutes = lambda t: int(t[:2]) * 60 + int(t[3:])  # noqa: E731
+    span = (minutes(end) - minutes(start)) % (24 * 60) or 24 * 60
+    days = [{**d, "start": start, "end": end} for d in schedule["days"]]
+    return {**schedule, "days": days, "stated": True,
+            "hours_per_week": round(len(days) * span / 60.0, 1),
+            "summary": ", ".join(d["short"] for d in days) + f" · {start}-{end} server time"}
 
 
 def guild_totals(conn: sqlite3.Connection) -> dict[str, Any]:
