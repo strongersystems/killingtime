@@ -508,86 +508,72 @@ def test_achievement_unknown_without_a_season_window(synced):
     assert s["achievement_earned"] is None and s["tier_over"] is False
 
 
-def _make_boss_art(*names: str) -> list:
-    """Drop artwork next to the real thing for the length of a test; returns the paths to clean up."""
-    from pathlib import Path
+def _art_dir(monkeypatch, tmp_path, *names: str):
+    """Point the artwork lookup at a temporary directory and drop stills for the named bosses in it.
 
+    Never write into killingtime/web/static: those files ship with the app, and a test that cleans up after itself
+    there will happily delete a real boss's picture.
+    """
     import killingtime.public as public
 
-    art = Path(public.__file__).parent / "web" / "static" / "site" / "bosses"
+    art = tmp_path / "bosses"
     art.mkdir(parents=True, exist_ok=True)
-    made = []
+    monkeypatch.setattr(public, "boss_art_dir", lambda: art)
     for name in names:
-        p = art / f"{metrics._slug(name)}.webp"
-        p.write_bytes(b"RIFFfake")
-        made.append(p)
-    return made
+        (art / f"{metrics._slug(name)}.webp").write_bytes(b"RIFFfake")
+    return art
 
 
-def _clean_boss_art(made: list) -> None:
-    for p in made:
-        p.unlink(missing_ok=True)
-    parent = made[0].parent if made else None
-    if parent and parent.exists() and not any(parent.iterdir()):
-        parent.rmdir()
-
-
-def test_boss_art_looks_on_disk():
+def test_boss_art_looks_on_disk(monkeypatch, tmp_path):
     """A boss only gets a picture if we actually generated one; a made-up slug never yields a URL."""
     from killingtime.public import boss_art
 
+    _art_dir(monkeypatch, tmp_path, "Dimensius")
     assert boss_art("no-such-boss-at-all") == {"still": None, "video": None}
     assert boss_art("") == {"still": None, "video": None}
-    made = _make_boss_art("Dimensius")
-    try:
-        art = boss_art("dimensius")
-        assert art["still"] == "/static/site/bosses/dimensius.webp"
-        assert art["video"] is None  # the clip is optional, and half a set must not invent the other half
-    finally:
-        _clean_boss_art(made)
+    art = boss_art("dimensius")
+    assert art["still"] == "/static/site/bosses/dimensius.webp"
+    assert art["video"] is None  # the clip is optional, and half a set must not invent the other half
 
 
-def test_kill_reel_orders_and_needs_artwork(synced):
+def test_kill_reel_orders_and_needs_artwork(synced, monkeypatch, tmp_path):
     """The reel only shows bosses we have art for, never twice, and leads with a real Cutting Edge."""
     from killingtime.public import kill_reel
 
     conn, *_, settings = synced
-    assert kill_reel(conn, settings) == []  # no artwork on disk yet: nothing may reach the page
+    _art_dir(monkeypatch, tmp_path)
+    assert kill_reel(conn, settings) == []  # no artwork: nothing may reach the page
 
     # Move the Manaforge cut-off past the Dimensius kill, so that clear becomes a genuine Cutting Edge.
     conn.execute("UPDATE rio_raids SET cutoff_at = ? WHERE slug = 'manaforge-omega'", (ms("2026-06-01"),))
     conn.commit()
-    made = _make_boss_art("Dimensius", "Nek'zali the Soulcoiler")
-    try:
-        reel = kill_reel(conn, settings)
-        slugs = [e["slug"] for e in reel]
-        assert slugs == ["dimensius", "nek-zali-the-soulcoiler"]  # CE end boss beats a more recent ordinary kill
-        assert len(slugs) == len(set(slugs)) and len(reel) <= 8
-        ce = reel[0]
-        assert ce["ce"] is True and ce["final"] is True and ce["headline"] == "Cutting Edge"
-        assert ce["sub"] == "Cutting Edge · 10 pulls · 2026-05-14" and ce["tier"] == "Manaforge Omega"
-        assert ce["still"] == "/static/site/bosses/dimensius.webp" and ce["video"] is None
-        assert reel[1]["ce"] is False and reel[1]["difficulty"] == "Mythic" and reel[1]["date"] == "2026-08-30"
-        assert len(kill_reel(conn, settings, limit=1)) == 1  # the cap is honoured
-    finally:
-        _clean_boss_art(made)
+    _art_dir(monkeypatch, tmp_path, "Dimensius", "Nek'zali the Soulcoiler")
+    reel = kill_reel(conn, settings)
+    slugs = [e["slug"] for e in reel]
+    assert slugs == ["dimensius", "nek-zali-the-soulcoiler"]  # CE end boss beats a more recent ordinary kill
+    assert len(slugs) == len(set(slugs)) and len(reel) <= 8
+    ce = reel[0]
+    assert ce["ce"] is True and ce["final"] is True and ce["headline"] == "Cutting Edge"
+    assert ce["sub"] == "Cutting Edge · 10 pulls · 2026-05-14" and ce["tier"] == "Manaforge Omega"
+    assert ce["still"] == "/static/site/bosses/dimensius.webp" and ce["video"] is None
+    assert reel[1]["ce"] is False and reel[1]["difficulty"] == "Mythic" and reel[1]["date"] == "2026-08-30"
+    assert len(kill_reel(conn, settings, limit=1)) == 1  # the cap is honoured
 
 
-def test_public_summary_carries_the_reel(synced):
+def test_public_summary_carries_the_reel(synced, monkeypatch, tmp_path):
     """The landing page gets per-boss art data, and the generic clip reel stays untouched beside it."""
     conn, *_, settings = synced
     keys = {"boss", "slug", "tier", "difficulty", "date", "pulls", "ce", "final", "still", "video", "headline", "sub"}
-    made = _make_boss_art("Nek'zali the Soulcoiler")
-    try:
-        data = public_summary(conn, settings)
-        assert data["clips"] and all("file" in c for c in data["clips"])  # the fallback reel is unchanged
-        assert data["kill_reel"] and all(set(e) == keys and e["still"] for e in data["kill_reel"])
-        latest = data["latest_kill"]
-        assert set(latest) == keys and latest["boss"] == "Nek'zali the Soulcoiler" and latest["date"] == "2026-08-30"
-        assert latest["still"] == "/static/site/bosses/nek-zali-the-soulcoiler.webp"
-    finally:
-        _clean_boss_art(made)
-    # With the art gone the kill is still reported, just without a picture for the caption.
+    _art_dir(monkeypatch, tmp_path, "Nek'zali the Soulcoiler")
+    data = public_summary(conn, settings)
+    assert data["clips"] and all("file" in c for c in data["clips"])  # the fallback reel is unchanged
+    assert data["kill_reel"] and all(set(e) == keys and e["still"] for e in data["kill_reel"])
+    latest = data["latest_kill"]
+    assert set(latest) == keys and latest["boss"] == "Nek'zali the Soulcoiler" and latest["date"] == "2026-08-30"
+    assert latest["still"] == "/static/site/bosses/nek-zali-the-soulcoiler.webp"
+
+    # With no art the kill is still reported, just without a picture for the caption.
+    _art_dir(monkeypatch, tmp_path / "empty")
     assert public_summary(conn, settings)["latest_kill"]["still"] is None
 
 

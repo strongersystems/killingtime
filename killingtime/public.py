@@ -150,9 +150,15 @@ def site_clips() -> list[dict[str, Any]]:
     return [c for c in CLIPS if (static / f"{c['file']}.webp").exists()]
 
 
+def boss_art_dir() -> Path:
+    """Where the generated boss artwork lives. A function so a test can point it somewhere disposable: writing
+    fixtures into the shipped asset directory once deleted a boss's picture."""
+    return Path(__file__).parent / "web" / "static" / "site" / "bosses"
+
+
 def boss_art(slug: str) -> dict[str, str | None]:
     """The generated artwork for one boss, if it has been made yet: still and clip are independent."""
-    static = Path(__file__).parent / "web" / "static" / "site" / "bosses"
+    static = boss_art_dir()
     if not slug:
         return {"still": None, "video": None}
     out: dict[str, str | None] = {}

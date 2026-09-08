@@ -74,6 +74,8 @@
     .clip .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 2rem .9rem .7rem; font-weight: 700; font-size: .95rem;
             background: linear-gradient(to top, rgba(10,9,8,.92), transparent); pointer-events: none; }
     .clip .cap small { display: block; font-weight: 500; font-size: .78rem; color: var(--ink-2); }
+    .clip .badge { position: absolute; top: .5rem; left: .6rem; font-size: .62rem; font-weight: 800; letter-spacing: .1em;
+            text-transform: uppercase; padding: .2rem .5rem; border-radius: 999px; background: var(--gold); color: #1a1408; }
 
     /* ---- recruit ----------------------------------------------------------------------------------- */
     .recruit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
@@ -222,10 +224,12 @@
         {% endif %}
       </div>
       <div class="shot reveal d2">
-        <img src="/static/site/kill.webp" alt="A boss goes down" loading="lazy">
+        {# The boss's own artwork if we have drawn it; otherwise the generic kill shot, never another boss's picture. #}
+        <img src="{{ latest_kill.still if latest_kill and latest_kill.still else '/static/site/kill.webp' }}"
+             alt="{{ (latest_kill.boss ~ ' defeated') if latest_kill else 'A boss goes down' }}" loading="lazy">
         <div class="over">
-          {% if latest_kills %}<h3>{{ latest_kills[0].boss }} is down</h3>
-          <p class="muted" style="margin:0">{{ latest_kills[0].difficulty_name }} · {{ latest_kills[0].date }}{% if latest_kills[0].pulls %} · {{ latest_kills[0].pulls }} pulls{% endif %}</p>
+          {% if latest_kill %}<h3>{{ latest_kill.boss }} is down</h3>
+          <p class="muted" style="margin:0">{{ latest_kill.difficulty }} · {{ latest_kill.date }}{% if latest_kill.pulls %} · {{ latest_kill.pulls }} pulls{% endif %}</p>
           {% else %}<h3>{{ current.name }}</h3><p class="muted" style="margin:0">Progress updates itself after every raid.</p>{% endif %}
         </div>
       </div>
@@ -281,6 +285,21 @@
   {% endif %}
 
   <section>
+    {% if kill_reel %}
+    <div class="sec-head reveal"><div><h2>Bosses we have put down</h2>
+      <p>Every one of these died to this guild. Cutting Edge kills first; hover or tap one to watch it happen.</p></div></div>
+    <div class="reel">
+      {% for k in kill_reel %}
+      {# The first two carry the section, so they get the wide frame. #}
+      <div class="clip reveal{{ ' wide' if loop.index0 < 2 }}{{ ' d' ~ (loop.index0 % 4) if loop.index0 % 4 }}"
+           {% if k.video %}data-src="{{ k.video }}"{% endif %}>
+        <img src="{{ k.still }}" alt="{{ k.boss }}" loading="lazy">
+        {% if k.ce %}<span class="badge">Cutting Edge</span>{% endif %}
+        <div class="cap">{{ k.boss }}<small>{{ k.tier }} · {{ k.sub }}</small></div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
     <div class="sec-head reveal"><div><h2>What a raid night looks like</h2>
       <p>The pull, the charge, the heal that holds it together, the wipe, and the bit that makes it worth it.</p></div></div>
     <div class="reel">
@@ -291,6 +310,7 @@
       </div>
       {% endfor %}
     </div>
+    {% endif %}
   </section>
 
   {% if portrait_strip %}
