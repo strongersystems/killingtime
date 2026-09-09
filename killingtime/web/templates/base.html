@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/charts.js"></script>
+  {% block styles %}{% endblock %}
 </head>
 <body>
   {% set path = request.url.path %}
@@ -27,6 +28,7 @@
       <a href="{{ link(base ~ '/roster', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/roster') }}">Roster</a>
       <a href="{{ link(base ~ '/meet', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/meet') }}">Meet the team</a>
       <a href="{{ link(base ~ '/nights', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/nights') }}">Nights</a>
+      <a href="{{ base }}/performance" class="{{ 'active' if path.startswith(base ~ '/performance') }}">Performance</a>
       <a href="{{ base }}/history" class="{{ 'active' if path.startswith(base ~ '/history') }}">History</a>
       <a href="{{ link(base ~ '/peers', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/peers') }}">Peers</a>
       <a href="{{ link(base ~ '/realm', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/realm') }}">Realm</a>

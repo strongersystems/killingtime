@@ -525,6 +525,26 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
         with db_lock:
             return as_json(metrics.peer_comparison(conn, raid_slug, difficulty, team, prev_raid_slug=prev, **peer_opts(peers, above, below)))
 
+    @app.get("/t/{slug}/performance", response_class=HTMLResponse)
+    def team_performance_page(request: Request, slug: str, x: int | None = None, tier: int | None = None,
+                              boss: int | None = None, d: int | None = None, m: str | None = None):
+        c = ctx(request, slug)
+        metric = m if m in ("best", "median", "avg") else "best"
+        with db_lock:
+            filters = metrics.performance_filters(conn)
+            data = metrics.team_performance(conn, team=c["team"], zone_id=tier, expansion_id=x,
+                                            encounter_id=boss, difficulty=d)
+        return with_cookie(templates.TemplateResponse(request, "performance.html", {
+            **c, "data": data, "filters": filters, "expansion_id": x, "tier_id": tier,
+            "boss_id": boss, "difficulty": d, "metric": metric}), slug)
+
+    @app.get("/api/team-performance")
+    def api_team_performance(team: str | None = None, tier: int | None = None, expansion: int | None = None,
+                             boss: int | None = None, difficulty: int | None = None, pugs: bool = False):
+        with db_lock:
+            return as_json(metrics.team_performance(conn, team=team, zone_id=tier, expansion_id=expansion,
+                                                    encounter_id=boss, difficulty=difficulty, include_pugs=pugs))
+
     @app.get("/api/performance/{zone_id}")
     def api_performance(zone_id: int, difficulty: int | None = None, team: str | None = None, pugs: bool = False):
         with db_lock:

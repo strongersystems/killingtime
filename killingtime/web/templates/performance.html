@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% set context_bar = true %}
+{% block title %}Performance{% endblock %}
+{% block styles %}
+<style>
+    .perf-filters { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: 0 0 1rem; }
+    .perf-filters select { background: var(--surface-2); color: var(--ink); border: 1px solid var(--border);
+            border-radius: 8px; padding: .4rem .6rem; font: inherit; font-size: .9rem; }
+    .perf-filters label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .grid-scroll { overflow-x: auto; }
+    table.perf td.n, table.perf th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .pk { display: inline-block; min-width: 2.6rem; text-align: right; padding: .1rem .35rem; border-radius: 6px;
+            font-variant-numeric: tabular-nums; font-weight: 700; font-size: .85rem; }
+    /* Warcraft Logs' own bands, so a number means here what it means there. */
+    .pk.grey { color: #9d9d9d; } .pk.green { color: #1eff00; } .pk.blue { color: #0070dd; }
+    .pk.purple { color: #a335ee; } .pk.orange { color: #ff8000; } .pk.pink { color: #e268a8; }
+    .who { display: flex; flex-direction: column; gap: .1rem; }
+    .who small { color: var(--muted); }
+    .matrix th.boss { font-size: .7rem; font-weight: 600; text-align: right; white-space: nowrap;
+            writing-mode: vertical-rl; transform: rotate(180deg); height: 12rem; padding: .3rem .1rem;
+            vertical-align: bottom; }
+    .matrix td { padding: .25rem .3rem; }
+    .empty-cell { color: var(--border); }
+</style>
+{% endblock %}
+{% block content %}
+{% macro pk(v) %}
+  {%- if v is none -%}<span class="empty-cell">·</span>
+  {%- else -%}
+  <span class="pk {{ 'pink' if v >= 100 else 'orange' if v >= 99 else 'purple' if v >= 95 else 'blue' if v >= 75 else 'green' if v >= 50 else 'grey' }}">{{ v|round(0)|int }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+<div class="page-head">
+  <div><h1>{{ team_label }} <span class="muted">·</span> Performance</h1>
+  <small>Best, median and average parse per raider and per boss, the way Warcraft Logs reports one person's.
+    Percentiles are against every guild logging that fight, DPS for damage and tanks, HPS for healers.</small></div>
+</div>
+
+<form class="perf-filters" method="get">
+  <label for="f-x">Expansion</label>
+  <select id="f-x" name="x" onchange="this.form.submit()">
+    <option value="">All</option>
+    {% for x in filters.expansions %}<option value="{{ x.id }}" {{ 'selected' if x.id == expansion_id }}>{{ x.name }}</option>{% endfor %}
+  </select>
+  <label for="f-tier">Raid</label>
+  <select id="f-tier" name="tier" onchange="this.form.submit()">
+    <option value="">All</option>
+    {% for t in filters.tiers if not expansion_id or t.expansion_id == expansion_id %}
+    <option value="{{ t.id }}" {{ 'selected' if t.id == tier_id }}>{{ t.name }}</option>{% endfor %}
+  </select>
+  <label for="f-boss">Boss</label>
+  <select id="f-boss" name="boss" onchange="this.form.submit()">
+    <option value="">All</option>
+    {% for b in filters.bosses if not tier_id or b.zone_id == tier_id %}
+    <option value="{{ b.id }}" {{ 'selected' if b.id == boss_id }}>{{ b.name }}</option>{% endfor %}
+  </select>
+  <label for="f-d">Difficulty</label>
+  <select id="f-d" name="d" onchange="this.form.submit()">
+    <option value="">All</option>
+    {% for code in (5, 4, 3) %}<option value="{{ code }}" {{ 'selected' if code == difficulty }}>{{ DIFFICULTIES[code] }}</option>{% endfor %}
+  </select>
+  <a class="pill" href="{{ request.url.path }}">Reset</a>
+</form>
+
+{% if not data.parses %}
+<div class="card"><p>No parses for this selection. Warcraft Logs only ranks kills, so a boss the team has not
+  killed on this difficulty has nothing to report.</p></div>
+{% else %}
+<div class="tiles">
+  <div class="tile"><div class="label">Parses</div><div class="value">{{ data.parses|num }}</div><div class="sub">ranked kills counted</div></div>
+  <div class="tile"><div class="label">Median</div><div class="value">{{ data.median|round(0)|int }}<span class="muted">%</span></div><div class="sub">across everyone in view</div></div>
+  <div class="tile"><div class="label">Average</div><div class="value">{{ data.avg|round(0)|int }}<span class="muted">%</span></div><div class="sub">mean of every parse</div></div>
+  <div class="tile"><div class="label">Best</div><div class="value">{{ data.best|round(0)|int }}<span class="muted">%</span></div>
+    <div class="sub">{{ data.players[0].player if data.players }}</div></div>
+</div>
+
+<h2>Raiders</h2>
+<div class="card scroll">
+  <table class="perf">
+    <thead><tr><th>Raider</th><th class="n">Kills</th><th class="n">Best</th><th class="n">Median</th><th class="n">Average</th><th class="n">Bracket avg</th></tr></thead>
+    <tbody>
+    {% for p in data.players %}
+      <tr>
+        <td><div class="who"><b>{{ p.player }}</b><small>{{ p.spec }} {{ p.class }}</small></div></td>
+        <td class="n">{{ p.kills }}</td>
+        <td class="n">{{ pk(p.best) }}</td>
+        <td class="n">{{ pk(p.median) }}</td>
+        <td class="n">{{ pk(p.avg) }}</td>
+        <td class="n">{{ pk(p.avg_bracket) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Bosses</h2>
+<div class="card scroll">
+  <table class="perf">
+    <thead><tr><th>Boss</th><th>Raid</th><th class="n">Parses</th><th class="n">Median</th><th class="n">Average</th><th>Best</th></tr></thead>
+    <tbody>
+    {% for b in data.bosses %}
+      <tr>
+        <td><b>{{ b.boss }}</b></td><td class="muted">{{ b.zone }}</td>
+        <td class="n">{{ b.kills }}</td><td class="n">{{ pk(b.median) }}</td><td class="n">{{ pk(b.avg) }}</td>
+        <td>{{ pk(b.best) }} <span class="muted">{{ b.best_player }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if data.bosses|length > 1 %}
+<h2>Everyone, every boss</h2>
+<div class="card scroll grid-scroll">
+  <table class="perf matrix">
+    <thead><tr><th>Raider</th>{% for b in data.bosses %}<th class="boss">{{ b.boss }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for p in data.players %}
+      <tr>
+        <td><b>{{ p.player }}</b></td>
+        {% for b in data.bosses %}<td class="n">{{ pk(p.bosses.get(b.id, {}).get(metric)) }}</td>{% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<small class="muted">Showing each raider's {{ metric }} on every boss in view.
+  Show
+  {% for m in ('best', 'median', 'avg') if m != metric %}<a href="{{ link(request.url.path, x=expansion_id, tier=tier_id, boss=boss_id, d=difficulty, m=m) }}">{{ m }}</a>{{ ' or ' if not loop.last }}{% endfor %} instead.</small>
+{% endif %}
+{% endif %}
+{% endblock %}

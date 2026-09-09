@@ -57,3 +57,32 @@ def test_empty_database_shows_onboarding(tmp_path, settings):
     app = create_app(settings, conn)
     r = TestClient(app).get("/")
     assert r.status_code == 200 and "No raid data yet" in r.text
+
+
+def test_performance_page_covers_every_team_and_filter(client):
+    """The whole point is one place to compare teams, so the filters have to stack and the page has to render."""
+    from killingtime import metrics
+
+    conn = client.app.state.conn
+    everyone = metrics.team_performance(conn)
+    assert everyone["parses"] and everyone["players"] and everyone["bosses"]
+    top = everyone["players"][0]
+    assert 0 <= top["median"] <= 100 and top["best"] >= top["median"]
+    assert top["bosses"], "a raider needs their per-boss breakdown, that is the Warcraft Logs view"
+
+    # Filters narrow rather than widen, and stack.
+    one_boss = everyone["bosses"][0]
+    just_that = metrics.team_performance(conn, encounter_id=one_boss["id"])
+    assert [b["id"] for b in just_that["bosses"]] == [one_boss["id"]]
+    assert just_that["parses"] <= everyone["parses"]
+    mythic = metrics.team_performance(conn, difficulty=5)
+    assert mythic["parses"] <= everyone["parses"]
+
+    opts = metrics.performance_filters(conn)
+    assert opts["tiers"] and opts["bosses"]
+
+    r = client.get("/t/guild/performance")
+    assert r.status_code == 200 and "Performance" in r.text
+    r = client.get(f"/t/guild/performance?d=5&boss={one_boss['id']}&m=median")
+    assert r.status_code == 200
+    assert client.get("/api/team-performance?difficulty=5").status_code == 200

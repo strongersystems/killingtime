@@ -951,6 +951,113 @@ def performance(
     }
 
 
+def team_performance(conn: sqlite3.Connection, team: str | None = None, zone_id: int | None = None,
+                     expansion_id: int | None = None, encounter_id: int | None = None,
+                     difficulty: int | None = None, include_pugs: bool = False) -> dict[str, Any]:
+    """Everyone's parses the way Warcraft Logs shows one person's: best, median and average, per boss.
+
+    The same numbers as :func:`performance`, but not tied to a single tier, and with the per-player per-boss grid
+    the site has never had. Filters stack, so a team on one boss in one expansion is the same call as the lot.
+    """
+    where = ["p.rank_percent IS NOT NULL", "p.difficulty IN (3, 4, 5)"]
+    params: list[Any] = []
+    for clause, value in (("p.zone_id = ?", zone_id), ("p.encounter_id = ?", encounter_id),
+                          ("p.difficulty = ?", difficulty), ("p.team = ?", team)):
+        if value is not None:
+            where.append(clause)
+            params.append(value)
+    if expansion_id is not None:
+        where.append("z.expansion_id = ?")
+        params.append(expansion_id)
+    if not include_pugs:
+        # A raider can be on another realm, so who counts is decided by having raided with us, not by the realm
+        # printed on the parse.
+        where.append("p.player_name IN (SELECT player_name FROM v_attendance WHERE presence = 1)")
+    rows = _rows(
+        conn,
+        f"""SELECT p.player_name, p.player_class, p.spec, p.role, p.rank_percent, p.bracket_percent,
+                   p.encounter_id, p.encounter_name, p.encounter_ord, p.zone_id, p.zone_name, p.difficulty,
+                   p.kill_date, z.expansion_id
+            FROM v_parses p JOIN zones z ON z.id = p.zone_id
+            WHERE {" AND ".join(where)}""",
+        tuple(params),
+    )
+
+    def stats(vals: list[float]) -> dict[str, Any]:
+        return {"kills": len(vals), "best": round(max(vals), 1), "median": _median(vals), "avg": _mean(vals)}
+
+    players: dict[str, dict[str, Any]] = {}
+    bosses: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        p = players.setdefault(r["player_name"], {"player": r["player_name"], "class": r["player_class"],
+                                                  "specs": {}, "roles": {}, "all": [], "brackets": [], "boss": {}})
+        p["specs"][r["spec"]] = p["specs"].get(r["spec"], 0) + 1
+        p["roles"][r["role"]] = p["roles"].get(r["role"], 0) + 1
+        p["all"].append(r["rank_percent"])
+        p["boss"].setdefault(r["encounter_id"], []).append(r["rank_percent"])
+        if r["bracket_percent"] is not None:
+            p["brackets"].append(r["bracket_percent"])
+        b = bosses.setdefault(r["encounter_id"], {"id": r["encounter_id"], "boss": r["encounter_name"],
+                                                  "ord": r["encounter_ord"], "zone_id": r["zone_id"],
+                                                  "zone": r["zone_name"], "all": [], "best": None})
+        b["all"].append(r["rank_percent"])
+        if b["best"] is None or r["rank_percent"] > b["best"][1]:
+            b["best"] = (r["player_name"], r["rank_percent"])
+
+    player_rows = []
+    for p in players.values():
+        player_rows.append({
+            "player": p["player"], "class": p["class"],
+            "spec": max(p["specs"], key=p["specs"].get) if p["specs"] else None,
+            "role": max(p["roles"], key=p["roles"].get) if p["roles"] else None,
+            "avg_bracket": _mean(p["brackets"]),
+            **stats(p["all"]),
+            "bosses": {eid: stats(v) for eid, v in p["boss"].items()},
+        })
+    player_rows.sort(key=lambda r: (-(r["median"] or 0), r["player"]))
+    boss_rows = sorted(
+        ({k: v for k, v in b.items() if k not in ("all", "best")} |
+         {"best_player": b["best"][0] if b["best"] else None,
+          "best": b["best"][1] if b["best"] else None, **stats(b["all"])}
+         for b in bosses.values()),
+        key=lambda b: (-b["zone_id"], b["ord"]),
+    )
+    everything = [r["rank_percent"] for r in rows]
+    return {
+        "team": team, "zone_id": zone_id, "expansion_id": expansion_id,
+        "encounter_id": encounter_id, "difficulty": difficulty, "include_pugs": include_pugs,
+        "players": player_rows, "bosses": boss_rows,
+        "parses": len(everything),
+        "best": round(max(everything), 1) if everything else None,
+        "median": _median(everything), "avg": _mean(everything),
+    }
+
+
+def performance_filters(conn: sqlite3.Connection) -> dict[str, Any]:
+    """What the Performance page can be narrowed to. Only tiers we hold parses for are offered.
+
+    There is no patch filter: a raid tier is the closest thing this database has to one, because Warcraft Logs
+    partitions are not something we sync.
+    """
+    tiers = _rows(
+        conn,
+        """SELECT z.id, z.name, z.expansion_id, x.name AS expansion, COUNT(*) AS parses
+           FROM v_parses p JOIN zones z ON z.id = p.zone_id LEFT JOIN expansions x ON x.id = z.expansion_id
+           WHERE p.rank_percent IS NOT NULL GROUP BY z.id ORDER BY z.id DESC""",
+    )
+    expansions, seen = [], set()
+    for t in tiers:
+        if t["expansion_id"] and t["expansion_id"] not in seen:
+            seen.add(t["expansion_id"])
+            expansions.append({"id": t["expansion_id"], "name": t["expansion"]})
+    bosses = _rows(
+        conn,
+        """SELECT e.id, e.name, e.zone_id, e.ord FROM v_parses p JOIN encounters e ON e.id = p.encounter_id
+           WHERE p.rank_percent IS NOT NULL GROUP BY e.id ORDER BY e.zone_id DESC, e.ord""",
+    )
+    return {"tiers": tiers, "expansions": expansions, "bosses": bosses}
+
+
 def parse_coverage(conn: sqlite3.Connection, zone_id: int) -> dict[str, int]:
     """How many kill reports in a zone have parses fetched, for the Status page."""
     row = conn.execute(
