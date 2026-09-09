@@ -219,12 +219,21 @@ async function servePublicSite(request: Request, env: Env, url: URL): Promise<Re
   }
   if (url.pathname === "/_healthz") return new Response("ok");
   if (url.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /\n", { headers: { "Content-Type": "text/plain" } });
-  // Portraits, CSS and the like come from the container, cached hard at the edge so it is woken rarely.
+  // Portraits, clips, CSS and the like come from the container, cached hard at the edge so it is woken rarely.
   if (url.pathname.startsWith("/static/")) {
-    const asset = await container.fetch(new Request(`${env.PUBLIC_URL}${url.pathname}`));
-    if (!asset.ok) return new Response("not found", { status: 404 });
+    // A video element asks for byte ranges, not the whole file. This used to build a fresh request and drop the
+    // Range header, so the container always answered 200 with the lot while the response still claimed
+    // accept-ranges. Safari on iOS will not play a video from a server that does that, and looping and seeking
+    // misbehave elsewhere, which is why the clips sat there as stills.
+    const range = request.headers.get("Range");
+    const asset = await container.fetch(
+      new Request(`${env.PUBLIC_URL}${url.pathname}`, range ? { headers: { Range: range } } : {}),
+    );
+    if (!asset.ok && asset.status !== 206) return new Response("not found", { status: 404 });
     const headers = new Headers(asset.headers);
-    headers.set("Cache-Control", "public, max-age=86400");
+    // Only whole responses get the long cache; a partial one must not be stored as if it were the file.
+    headers.set("Cache-Control", asset.status === 206 ? "public, max-age=3600" : "public, max-age=86400");
+    headers.set("Accept-Ranges", "bytes");
     const type = MIME[url.pathname.slice(url.pathname.lastIndexOf(".") + 1).toLowerCase()];
     if (type) headers.set("Content-Type", type);   // the container serves .webp as octet-stream
     return new Response(asset.body, { status: asset.status, headers });

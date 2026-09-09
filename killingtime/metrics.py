@@ -474,7 +474,21 @@ def team_progress(conn: sqlite3.Connection, zone_id: int, teams: list[str]) -> l
                     "first_pull_date": s["first_pull_date"],
                 }
             )
-        out.append({"team": team, "difficulties": diffs, "latest_kills": latest_kills(conn, 5, team=team, zone_id=zone_id)})
+        # Boss by boss at the hardest difficulty the team is actually raiding, so the public card can show where
+        # they got to rather than only how many fell. A boss they have not killed carries their best pull instead.
+        bosses = []
+        if diffs:
+            best = max(d["difficulty"] for d in diffs)
+            for b in tier_summary(conn, zone_id, best, team)["bosses"]:
+                bosses.append({
+                    "boss": b["name"], "ord": b["ord"], "killed": bool(b["counts"]),
+                    "date": b["kill_date"] if b["counts"] else None,
+                    "pulls": b["pulls_to_kill"] or b["total_pulls"] or None,
+                    "best_pct": round(b["best_pct"], 1) if not b["counts"] and b["best_pct"] is not None else None,
+                    "difficulty": DIFFICULTIES[best],
+                })
+        out.append({"team": team, "difficulties": diffs, "bosses": bosses,
+                    "latest_kills": latest_kills(conn, 5, team=team, zone_id=zone_id)})
     return out
 
 

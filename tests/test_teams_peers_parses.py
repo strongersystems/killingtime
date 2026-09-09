@@ -780,6 +780,23 @@ def test_the_public_api_reports_how_the_last_sync_went(synced):
     assert run["warnings"] == ["wcl: rate limited"]
 
 
+def test_each_team_carries_its_own_boss_by_boss_progress(synced):
+    """The public team card has to show where a team got to, not only how many fell."""
+    conn, *_ = synced
+    cur = metrics.current_tier(conn)
+    teams = [t for t in metrics.teams_seen(conn) if t]
+    progress = metrics.team_progress(conn, cur["id"], teams)
+    assert progress, "fixture has no teams"
+    for t in progress:
+        assert t["bosses"], f"{t['team']} has no boss list"
+        # Reported at the hardest difficulty that team actually raids, and every boss says one thing or the other.
+        assert len({b["difficulty"] for b in t["bosses"]}) == 1
+        for b in t["bosses"]:
+            assert b["killed"] == (b["date"] is not None)
+            if not b["killed"] and b["best_pct"] is not None:
+                assert 0 <= b["best_pct"] <= 100
+
+
 def test_a_raider_who_has_left_comes_off_the_page(synced):
     """Their nights stay in the logs and in the tier numbers; the card goes."""
     conn, *_ = synced

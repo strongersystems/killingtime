@@ -127,6 +127,19 @@
       .reel.wall .clip.lg { aspect-ratio: 16 / 9; }
     }
 
+    .team-card .prog { list-style: none; margin: .2rem 0 0; padding: 0; display: grid; gap: 1px;
+            background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .team-card .prog li { display: grid; grid-template-columns: 1fr auto auto; gap: .6rem; align-items: baseline;
+            padding: .38rem .6rem; background: var(--surface-2); font-size: .82rem; }
+    .team-card .prog li.done .n { color: var(--ink); }
+    .team-card .prog li .n { color: var(--ink-2); }
+    .team-card .prog li .d { font-variant-numeric: tabular-nums; font-size: .75rem; color: var(--muted); }
+    .team-card .prog li.done .d { color: var(--good); }
+    .team-card .prog li .d.live { color: var(--gold); font-weight: 700; }
+    .team-card .prog li .p { font-size: .7rem; color: var(--muted); font-variant-numeric: tabular-nums;
+            min-width: 2.4rem; text-align: right; }
+    .team-card .prog-key { font-size: .68rem; margin-top: .45rem; }
+
     /* ---- recruit ----------------------------------------------------------------------------------- */
     .recruit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
     .need { border: 1px solid var(--border); border-radius: 14px; padding: 1rem 1.1rem; background: var(--surface-2); }
@@ -322,12 +335,20 @@
         {% elif t.difficulties %}
         <div class="state">Nothing left standing on {{ t.difficulties[0].name }} · <b>{{ ns.pulls|num }}</b> pulls in the tier</div>
         {% endif %}
-        {% if t.latest_kills %}
-        <ul class="recent">
-          {% for k in t.latest_kills[:3] %}
-          <li><span class="pill {{ k.difficulty_name[0]|lower }}">{{ k.difficulty_name[0] }}</span><span>{{ k.boss }}</span><span class="d">{{ k.date }}</span></li>
+        {% if t.bosses %}
+        {# Boss by boss at the hardest difficulty this team raids: the date it died, or how far they have got. #}
+        <ol class="prog">
+          {% for b in t.bosses %}
+          <li class="{{ 'done' if b.killed }}">
+            <span class="n">{{ b.boss }}</span>
+            {% if b.killed %}<span class="d">{{ b.date }}</span>
+            {% elif b.best_pct is not none %}<span class="d live">{{ b.best_pct }}%</span>
+            {% else %}<span class="d muted">not pulled</span>{% endif %}
+            {% if b.pulls %}<span class="p">{{ b.pulls|num }}</span>{% endif %}
+          </li>
           {% endfor %}
-        </ul>
+        </ol>
+        <div class="prog-key muted">{{ t.bosses[0].difficulty }} · date killed, or best pull, and pull count</div>
         {% endif %}
       </div>
       {% endfor %}
