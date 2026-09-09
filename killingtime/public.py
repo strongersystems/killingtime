@@ -171,8 +171,12 @@ def boss_art(slug: str) -> dict[str, str | None]:
 
 
 def _reel_entry(boss: str, tier: str, difficulty: str, date: str | None, pulls: int | None,
-                ce: bool, final: bool) -> dict[str, Any]:
-    """One kill as the gallery wants it. Every word of ``sub`` comes from the logs; nothing is dressed up."""
+                ce: bool, final: bool, ord: int | None = None, of: int | None = None,
+                nights: int | None = None, wipes: int | None = None) -> dict[str, Any]:
+    """One kill as the gallery wants it. Every word of ``sub`` comes from the logs; nothing is dressed up.
+
+    ``ord``/``of`` are the boss's place in the run order, so a tile can say which one of the tier it was without
+    the reader counting along the row."""
     slug = metrics._slug(boss)
     art = boss_art(slug)
     bits = ["Cutting Edge" if ce else difficulty]
@@ -180,9 +184,21 @@ def _reel_entry(boss: str, tier: str, difficulty: str, date: str | None, pulls: 
         bits.append(f"{pulls} pull{'' if pulls == 1 else 's'}")
     if date:
         bits.append(date)
+    # What it took, shortest honest form: pulls always, then nights and wipes when the logs have them.
+    prog = []
+    if pulls:
+        prog.append(f"{pulls:,} pull{'' if pulls == 1 else 's'}")
+    if nights:
+        prog.append(f"{nights} night{'' if nights == 1 else 's'}")
+    if wipes:
+        prog.append(f"{wipes:,} wipe{'' if wipes == 1 else 's'}")
     return {
         "boss": boss, "slug": slug, "tier": tier, "difficulty": difficulty, "date": date,
         "pulls": int(pulls) if pulls else None, "ce": ce, "final": final,
+        "ord": ord, "of": of, "nights": nights, "wipes": wipes,
+        "prog": " · ".join(prog),
+        # A 166px plate fits a date and one more thing. The nights and wipes are for the tiles with room.
+        "prog_short": prog[0] if prog else "",
         "still": art["still"], "video": art["video"],
         "headline": "Cutting Edge" if ce else "Final boss down" if final else f"{difficulty} kill",
         "sub": " · ".join(bits),
@@ -241,8 +257,10 @@ def kill_reel(conn: sqlite3.Connection, settings: Settings, tiers: int = 6) -> l
             if not b["killed_any"] or not b["kill_ms"]:
                 continue
             final = b is last
-            entries.append(_reel_entry(b["name"], tier_name, DIFFICULTIES[5], b["kill_date"], b["pulls_to_kill"],
-                                       ce=ce and final, final=final))
+            entries.append(_reel_entry(
+                b["name"], tier_name, DIFFICULTIES[5], b["kill_date"], b["pulls_to_kill"], ce=ce and final,
+                final=final, ord=b["ord"], of=len(s["bosses"]), nights=b.get("nights_to_kill"),
+                wipes=b.get("wipes_before_kill")))
         if not entries:
             continue
         current = i == 0

@@ -568,7 +568,8 @@ def test_kill_reel_groups_by_tier_newest_first(synced, monkeypatch, tmp_path):
 def test_public_summary_carries_the_reel(synced, monkeypatch, tmp_path):
     """The landing page gets per-boss art data, and the generic clip reel stays untouched beside it."""
     conn, *_, settings = synced
-    keys = {"boss", "slug", "tier", "difficulty", "date", "pulls", "ce", "final", "still", "video", "headline", "sub"}
+    keys = {"boss", "slug", "tier", "difficulty", "date", "pulls", "ce", "final", "still", "video", "headline",
+            "sub", "ord", "of", "nights", "wipes", "prog", "prog_short"}
     _art_dir(monkeypatch, tmp_path, "Nek'zali the Soulcoiler")
     data = public_summary(conn, settings)
     assert data["clips"] and all("file" in c for c in data["clips"])  # the fallback reel is unchanged
@@ -795,6 +796,23 @@ def test_each_team_carries_its_own_boss_by_boss_progress(synced):
             assert b["killed"] == (b["date"] is not None)
             if not b["killed"] and b["best_pct"] is not None:
                 assert 0 <= b["best_pct"] <= 100
+
+
+def test_a_kill_tile_says_where_the_boss_sat_and_what_it_cost(synced, monkeypatch, tmp_path):
+    """The wall is the only place most people look, so a tile carries the run order and the prog, not just a date."""
+    from killingtime.public import kill_reel
+
+    conn, *_, settings = synced
+    _art_dir(monkeypatch, tmp_path, "Dimensius")
+    for g in kill_reel(conn, settings):
+        for k in g["kills"]:
+            assert 1 <= k["ord"] <= k["of"], f"{k['boss']} sits at {k['ord']} of {k['of']}"
+            assert k["prog"] == "" or "pull" in k["prog"]
+            if k["pulls"]:
+                assert f"{k['pulls']:,} pull" in k["prog"]
+                # The short form is what a small plate shows, and it must never be the long one.
+                assert k["prog_short"] == f"{k['pulls']:,} pull" + ("" if k["pulls"] == 1 else "s")
+                assert len(k["prog_short"]) <= len(k["prog"])
 
 
 def test_a_raider_who_has_left_comes_off_the_page(synced):

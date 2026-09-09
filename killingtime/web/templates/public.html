@@ -108,6 +108,13 @@
     .reel.wall .clip.lg .cap small { font-size: .82rem; margin-top: .25rem; }
     .reel.wall .clip .badge { font-size: .55rem; padding: .16rem .42rem; }
     .reel.wall .clip.lg .badge { font-size: .62rem; padding: .22rem .55rem; top: .75rem; left: .85rem; }
+    /* Where the boss sat in the run order, so a tile says which one of the tier it was. */
+    .reel.wall .clip .pos { position: absolute; top: .4rem; right: .45rem; z-index: 2; font-size: .6rem;
+            font-weight: 800; letter-spacing: .04em; padding: .12rem .38rem; border-radius: 999px;
+            background: rgba(10,9,8,.72); border: 1px solid var(--border); color: var(--ink-2);
+            font-variant-numeric: tabular-nums; backdrop-filter: blur(3px); }
+    .reel.wall .clip.lg .pos, .reel.wall .clip.xl .pos { font-size: .7rem; top: .75rem; right: .85rem;
+            padding: .2rem .55rem; }
     /* No artwork for this one: a name and a date on a plate, rather than somebody else's dragon. */
     .clip.plate { background: radial-gradient(120% 95% at 50% 0%, rgba(232,176,74,.14), transparent 62%), #16130f; }
     .clip.plate .cap { inset: 0; display: grid; align-content: center; justify-items: center; text-align: center;
@@ -393,7 +400,9 @@
                {% if k.video %}data-src="{{ k.video }}"{% endif %}>
             {% if k.still %}<img src="{{ k.still }}" alt="{{ k.boss }}" loading="lazy">{% endif %}
             {% if k.ce %}<span class="badge">Cutting Edge</span>{% endif %}
-            <div class="cap">{{ k.boss }}<small>{{ k.date }}{% if k.pulls %} · {{ k.pulls|num }} pull{{ '' if k.pulls == 1 else 's' }}{% endif %}</small></div>
+            {% if k.ord and k.of %}<span class="pos">{{ k.ord }}/{{ k.of }}</span>{% endif %}
+            {% set line = k.prog if k.size in ('lg', 'xl', 'md') else k.prog_short %}
+            <div class="cap">{{ k.boss }}<small>{{ k.date }}{% if line %} · {{ line }}{% endif %}</small></div>
           </div>
           {% endfor %}
         </div>
