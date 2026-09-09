@@ -96,7 +96,10 @@
     .reel.wall .clip { grid-column: span 2; aspect-ratio: 1 / 1; border-radius: 10px; }
     .reel.wall .clip.md { grid-column: span 4; aspect-ratio: 16 / 9; border-radius: 14px; }
     .reel.wall .clip.xl { grid-column: span 6; aspect-ratio: 16 / 9; border-radius: 14px; }
-    .reel.wall .clip.lg { grid-column: 1 / -1; aspect-ratio: 32 / 9; border-radius: 14px; }
+    /* The end boss keeps its own row, but the box is the shape of the clip inside it. Full width at 32:9 threw
+       away half the frame; this is narrower, taller and crops nothing, and it still fills a phone. */
+    .reel.wall .clip.lg { grid-column: 1 / -1; width: min(100%, 880px); margin-inline: auto;
+            aspect-ratio: 16 / 9; border-radius: 14px; }
     .reel.wall .clip .cap { padding: 1.3rem .55rem .45rem; font-size: .74rem; line-height: 1.15; }
     .reel.wall .clip .cap small { font-size: .64rem; margin-top: .12rem; }
     .reel.wall .clip.md .cap, .reel.wall .clip.xl .cap { padding: 2rem .9rem .7rem; font-size: 1rem; line-height: 1.2; }
@@ -114,7 +117,7 @@
       .reel.wall { grid-template-columns: repeat(6, 1fr); }
       .reel.wall .clip { grid-column: span 2; aspect-ratio: 1 / 1; }
       .reel.wall .clip.md, .reel.wall .clip.xl { grid-column: span 3; aspect-ratio: 16 / 9; }
-      .reel.wall .clip.lg { grid-column: 1 / -1; aspect-ratio: 21 / 9; }
+      .reel.wall .clip.lg { grid-column: 1 / -1; width: 100%; aspect-ratio: 16 / 9; }
       .reel.wall .clip.lg .cap { font-size: 1.15rem; }
     }
     @media (max-width: 560px) {
@@ -491,9 +494,9 @@
   v.addEventListener("error", () => v.remove(), { once: true });
 })();
 
-// The reel. A tile is a poster until something asks for the clip, and only a few clips are ever alive at once:
-// the wall can hold thirty of them, browsers run out of video decoders long before that, and the ones over the
-// limit fail silently, which looked like "only the big ones work".
+// The reel. Every clip plays on its own once it is on screen, on a phone as much as a desktop, and loops until
+// it scrolls away. Only a few are ever alive at once: the wall can hold thirty, browsers run out of video
+// decoders well before that, and the ones over the limit fail silently with nothing in the console to say why.
 (function () {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const c = navigator.connection || {};
@@ -502,6 +505,8 @@
   if (!tiles.length) return;
   const MAX_LIVE = 4;
   const live = [];
+  const onScreen = new Set();
+  let pointed = null;
 
   const detach = (tile) => {
     const i = live.indexOf(tile);
@@ -513,7 +518,6 @@
 
   const attach = (tile) => {
     if (tile.dataset.loaded) return tile.querySelector("video");
-    while (live.length >= MAX_LIVE) detach(live[0]);
     tile.dataset.loaded = "1";
     const v = document.createElement("video");
     v.muted = true; v.loop = true; v.playsInline = true; v.preload = "none";
@@ -524,27 +528,31 @@
     return v;
   };
 
-  const play = (tile) => {
-    const v = attach(tile);
-    if (!v) return;
-    const i = live.indexOf(tile);          // most recently asked for, so the oldest is the one reclaimed
-    if (i >= 0) { live.splice(i, 1); live.push(tile); }
-    v.play().catch(() => {});
+  // Chosen in document order so the set is stable: eight plates arriving together would otherwise each evict the
+  // last and none of them would ever get going.
+  const sync = () => {
+    const want = [];
+    if (pointed) want.push(pointed);
+    for (const t of tiles) {
+      if (want.length >= MAX_LIVE) break;
+      if (onScreen.has(t) && want.indexOf(t) < 0) want.push(t);
+    }
+    live.slice().forEach((t) => { if (want.indexOf(t) < 0) detach(t); });
+    want.forEach((t) => { const v = attach(t); if (v) v.play().catch(() => {}); });
   };
 
   tiles.forEach((tile) => {
-    tile.addEventListener("mouseenter", () => play(tile));
-    tile.addEventListener("click", () => play(tile));
+    tile.addEventListener("mouseenter", () => { pointed = tile; sync(); });
+    tile.addEventListener("mouseleave", () => { if (pointed === tile) { pointed = null; sync(); } });
+    tile.addEventListener("click", () => { pointed = tile; sync(); });
   });
 
   if (reduced || cheap || !window.IntersectionObserver) return;
-  // Only the big tiles start by themselves. A row of eight small plates would take every decoder going and the
-  // banners would be the ones left as stills; a plate plays when you point at it or tap it.
-  const io = new IntersectionObserver((es) => es.forEach((e) => {
-    if (e.isIntersecting) play(e.target);
-    else { const v = e.target.querySelector("video"); if (v) v.pause(); }
-  }), { threshold: 0.35 });
-  tiles.filter((t) => t.matches(".lg, .xl, .md, .wide")).forEach((t) => io.observe(t));
+  const io = new IntersectionObserver((es) => {
+    es.forEach((e) => e.isIntersecting ? onScreen.add(e.target) : onScreen.delete(e.target));
+    sync();
+  }, { threshold: 0.3 });
+  tiles.forEach((t) => io.observe(t));
 })();
 </script>
 {% endblock %}
