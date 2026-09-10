@@ -92,6 +92,16 @@ CREATE TABLE IF NOT EXISTS fights (
 );
 CREATE INDEX IF NOT EXISTS idx_fights_encounter ON fights(encounter_id, difficulty, start_time);
 
+-- Warcraft Logs partitions: the patches inside a tier ("12.0", "12.1"). Rankings always belong to one.
+CREATE TABLE IF NOT EXISTS zone_partitions (
+    zone_id INTEGER NOT NULL REFERENCES zones(id) ON DELETE CASCADE,
+    partition_id INTEGER NOT NULL,
+    name TEXT,
+    compact_name TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (zone_id, partition_id)
+);
+
 -- Warcraft Logs guild zone rankings (progress / speed) for the home guild.
 CREATE TABLE IF NOT EXISTS wcl_zone_rankings (
     guild_id INTEGER NOT NULL REFERENCES guilds(id),
@@ -268,6 +278,8 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("characters", "achievement_points", "INTEGER"),
     ("characters", "faction", "TEXT"),
     ("characters", "profile_version", "INTEGER NOT NULL DEFAULT 0"),
+    # Which patch a parse was ranked in. Null for every row fetched before partitions were synced.
+    ("parses", "partition", "INTEGER"),
 ]
 
 VIEWS = """

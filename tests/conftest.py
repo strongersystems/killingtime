@@ -128,6 +128,13 @@ class FakeWCL:
         self.queries_made += 1
         return [z for z in ZONES if z["expansion"]["id"] == expansion_id]
 
+    def zone_partitions(self, expansion_id):
+        """Two patches for the current tier, the way Warcraft Logs splits one."""
+        self.queries_made += 1
+        return {z["id"]: [{"id": 1, "name": "Patch 12.0", "compactName": "12.0", "default": False},
+                          {"id": 2, "name": "Patch 12.1", "compactName": "12.1", "default": True}]
+                for z in ZONES if z["expansion"]["id"] == expansion_id}
+
     def guild(self, name, server_slug, server_region):
         self.queries_made += 1
         if name.lower() != "killing time":

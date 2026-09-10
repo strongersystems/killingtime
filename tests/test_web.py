@@ -86,3 +86,36 @@ def test_performance_page_covers_every_team_and_filter(client):
     r = client.get(f"/t/guild/performance?d=5&boss={one_boss['id']}&m=median")
     assert r.status_code == 200
     assert client.get("/api/team-performance?difficulty=5").status_code == 200
+
+
+def test_patch_filter_appears_only_once_partitions_are_synced(client):
+    """A patch filter has to come from Warcraft Logs partitions, never from a guess about dates."""
+    from killingtime import metrics
+
+    conn = client.app.state.conn
+    # The sync records the partitions the zone actually has.
+    assert conn.execute("SELECT COUNT(*) c FROM zone_partitions").fetchone()["c"] > 0
+
+    # No parse carries one yet, so no patch is offered and the select is not on the page.
+    conn.execute("UPDATE parses SET partition = NULL")
+    conn.commit()
+    assert metrics.performance_filters(conn)["patches"] == []
+    assert 'name="p"' not in client.get("/t/guild/performance").text
+
+    # Tag one tier's parses and the filter appears, named from that zone's partition list.
+    zone = conn.execute("SELECT zone_id FROM v_parses WHERE rank_percent IS NOT NULL LIMIT 1").fetchone()["zone_id"]
+    conn.execute("UPDATE parses SET partition = 2 WHERE encounter_id IN "
+                 "(SELECT id FROM encounters WHERE zone_id = ?)", (zone,))
+    conn.commit()
+    patches = metrics.performance_filters(conn)["patches"]
+    assert [p["name"] for p in patches] == ["12.1"] and patches[0]["parses"] > 0
+
+    page = client.get("/t/guild/performance").text
+    assert 'name="p"' in page and "12.1" in page
+
+    # The option count is every parse in that partition; the page drops non-raiders, so compare like with like.
+    assert metrics.team_performance(conn, partition=2, include_pugs=True)["parses"] == patches[0]["parses"]
+    assert 0 < metrics.team_performance(conn, partition=2)["parses"] <= patches[0]["parses"]
+    assert metrics.team_performance(conn, partition=99)["parses"] == 0
+    assert client.get("/t/guild/performance?p=2").status_code == 200
+    assert client.get("/api/team-performance?patch=2").status_code == 200

@@ -156,6 +156,30 @@ def drop_zone(conn: sqlite3.Connection, zone_id: int) -> None:
     conn.execute("DELETE FROM zones WHERE id = ?", (zone_id,))
 
 
+def sync_partitions(conn: sqlite3.Connection, wcl: WCLClient, exp: dict, raids: list[dict],
+                    stats: SyncStats, progress: Progress) -> None:
+    """Record the patches inside each tier. A failure here costs the patch filter, nothing else."""
+    try:
+        by_zone = wcl.zone_partitions(exp["id"])
+    except Exception as exc:  # noqa: BLE001 - partitions are a nicety; zones and encounters are not
+        stats.warn(f"partitions unavailable for {exp['name']}: {exc}", progress)
+        return
+    n = 0
+    for z in raids:
+        for part in by_zone.get(int(z["id"])) or []:
+            conn.execute(
+                """INSERT INTO zone_partitions(zone_id, partition_id, name, compact_name, is_default)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(zone_id, partition_id) DO UPDATE SET name = excluded.name,
+                       compact_name = excluded.compact_name, is_default = excluded.is_default""",
+                (int(z["id"]), int(part["id"]), part.get("name"), part.get("compactName"),
+                 int(bool(part.get("default")))),
+            )
+            n += 1
+    if n:
+        progress(f"  {n} patch partitions for {exp['name']}")
+
+
 def sync_zones(conn: sqlite3.Connection, wcl: WCLClient, n_expansions: int, stats: SyncStats, progress: Progress) -> None:
     expansions = sorted(wcl.expansions(), key=lambda e: e["id"], reverse=True)[: max(1, n_expansions)]
     with transaction(conn):
@@ -188,6 +212,7 @@ def sync_zones(conn: sqlite3.Connection, wcl: WCLClient, n_expansions: int, stat
                         (enc["id"], z["id"], enc["name"], i + 1),
                     )
                     stats.encounters += 1
+            sync_partitions(conn, wcl, exp, raids, stats, progress)
 
 
 def sync_home_guild_wcl(conn: sqlite3.Connection, wcl: WCLClient, settings: Settings, stats: SyncStats, progress: Progress) -> int:
@@ -454,10 +479,17 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
                         continue
                     for role in roles:
                         for ch in ((fight.get("roles") or {}).get(role) or {}).get("characters") or []:
+                            # Rankings always belong to a partition. Warcraft Logs reports it per fight or per
+                            # character depending on the payload, so take whichever is there and store nothing
+                            # when neither is: a guessed patch is worse than no patch filter.
+                            part = fight.get("partition")
+                            if part is None:
+                                part = ch.get("partition")
                             rows.append(
                                 (code, int(fight["fightID"]), int(enc), fight.get("difficulty"), ch.get("name"),
                                  (ch.get("server") or {}).get("name"), ch.get("class"), ch.get("spec"), role, metric,
-                                 ch.get("amount"), ch.get("rankPercent"), ch.get("bracketPercent"))
+                                 ch.get("amount"), ch.get("rankPercent"), ch.get("bracketPercent"),
+                                 int(part) if part is not None else None)
                             )
         except WCLError as exc:
             stats.warn(f"parses unavailable for report {code}: {exc}", progress)
@@ -468,7 +500,8 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
             conn.execute("DELETE FROM parses WHERE report_code = ?", (code,))
             conn.executemany(
                 """INSERT OR REPLACE INTO parses(report_code, fight_id, encounter_id, difficulty, player_name, server, player_class, spec,
-                       role, metric, amount, rank_percent, bracket_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       role, metric, amount, rank_percent, bracket_percent, partition)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [r for r in rows if r[4]],
             )
             conn.execute("UPDATE reports SET rankings_synced_at = ? WHERE code = ?", (now_ms(), code))

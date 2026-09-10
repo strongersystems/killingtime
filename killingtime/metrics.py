@@ -967,7 +967,8 @@ def performance(
 
 def team_performance(conn: sqlite3.Connection, team: str | None = None, zone_id: int | None = None,
                      expansion_id: int | None = None, encounter_id: int | None = None,
-                     difficulty: int | None = None, include_pugs: bool = False) -> dict[str, Any]:
+                     difficulty: int | None = None, partition: int | None = None,
+                     include_pugs: bool = False) -> dict[str, Any]:
     """Everyone's parses the way Warcraft Logs shows one person's: best, median and average, per boss.
 
     The same numbers as :func:`performance`, but not tied to a single tier, and with the per-player per-boss grid
@@ -976,7 +977,8 @@ def team_performance(conn: sqlite3.Connection, team: str | None = None, zone_id:
     where = ["p.rank_percent IS NOT NULL", "p.difficulty IN (3, 4, 5)"]
     params: list[Any] = []
     for clause, value in (("p.zone_id = ?", zone_id), ("p.encounter_id = ?", encounter_id),
-                          ("p.difficulty = ?", difficulty), ("p.team = ?", team)):
+                          ("p.difficulty = ?", difficulty), ("p.team = ?", team),
+                          ("p.partition = ?", partition)):
         if value is not None:
             where.append(clause)
             params.append(value)
@@ -1039,7 +1041,8 @@ def team_performance(conn: sqlite3.Connection, team: str | None = None, zone_id:
     everything = [r["rank_percent"] for r in rows]
     return {
         "team": team, "zone_id": zone_id, "expansion_id": expansion_id,
-        "encounter_id": encounter_id, "difficulty": difficulty, "include_pugs": include_pugs,
+        "encounter_id": encounter_id, "difficulty": difficulty, "partition": partition,
+        "include_pugs": include_pugs,
         "players": player_rows, "bosses": boss_rows,
         "parses": len(everything),
         "best": round(max(everything), 1) if everything else None,
@@ -1050,8 +1053,8 @@ def team_performance(conn: sqlite3.Connection, team: str | None = None, zone_id:
 def performance_filters(conn: sqlite3.Connection) -> dict[str, Any]:
     """What the Performance page can be narrowed to. Only tiers we hold parses for are offered.
 
-    There is no patch filter: a raid tier is the closest thing this database has to one, because Warcraft Logs
-    partitions are not something we sync.
+    Patches are Warcraft Logs partitions, and only those we hold parses for are offered. A tier synced before
+    partitions existed has none, so the filter stays hidden rather than pretending every kill is unpatched.
     """
     tiers = _rows(
         conn,
@@ -1069,7 +1072,16 @@ def performance_filters(conn: sqlite3.Connection) -> dict[str, Any]:
         """SELECT e.id, e.name, e.zone_id, e.ord FROM v_parses p JOIN encounters e ON e.id = p.encounter_id
            WHERE p.rank_percent IS NOT NULL GROUP BY e.id ORDER BY e.zone_id DESC, e.ord""",
     )
-    return {"tiers": tiers, "expansions": expansions, "bosses": bosses}
+    patches = _rows(
+        conn,
+        """SELECT p.partition AS id, z.id AS zone_id, z.name AS zone,
+                  COALESCE(zp.compact_name, zp.name, 'Patch ' || p.partition) AS name, COUNT(*) AS parses
+           FROM v_parses p JOIN zones z ON z.id = p.zone_id
+           LEFT JOIN zone_partitions zp ON zp.zone_id = p.zone_id AND zp.partition_id = p.partition
+           WHERE p.rank_percent IS NOT NULL AND p.partition IS NOT NULL
+           GROUP BY p.zone_id, p.partition ORDER BY z.id DESC, p.partition DESC""",
+    )
+    return {"tiers": tiers, "expansions": expansions, "bosses": bosses, "patches": patches}
 
 
 def parse_coverage(conn: sqlite3.Connection, zone_id: int) -> dict[str, int]:

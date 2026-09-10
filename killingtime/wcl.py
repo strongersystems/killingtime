@@ -146,6 +146,25 @@ class WCLClient:
         data = self.query(gql, {"exp": expansion_id})
         return data["worldData"]["zones"] or []
 
+    def zone_partitions(self, expansion_id: int) -> dict[int, list[dict[str, Any]]]:
+        """Patch partitions per zone, keyed by zone id.
+
+        Kept apart from :meth:`zones` on purpose. A partition is what Warcraft Logs calls a patch within a tier,
+        and rankings always belong to one; asking for the field alongside the zone sync would mean a schema change
+        at their end could take the zones down with it, and zones are load-bearing.
+        """
+        gql = """
+        query Partitions($exp: Int) {
+          worldData { zones(expansion_id: $exp) { id partitions { id name compactName default } } }
+        }"""
+        data = self.query(gql, {"exp": expansion_id})
+        out: dict[int, list[dict[str, Any]]] = {}
+        for z in (data.get("worldData") or {}).get("zones") or []:
+            parts = z.get("partitions") or []
+            if parts:
+                out[int(z["id"])] = parts
+        return out
+
     def guild(self, name: str, server_slug: str, server_region: str) -> dict[str, Any] | None:
         gql = """
         query Guild($name: String!, $slug: String!, $region: String!) {

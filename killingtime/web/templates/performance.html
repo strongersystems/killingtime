@@ -55,6 +55,15 @@
     {% for b in filters.bosses if not tier_id or b.zone_id == tier_id %}
     <option value="{{ b.id }}" {{ 'selected' if b.id == boss_id }}>{{ b.name }}</option>{% endfor %}
   </select>
+  {# Only shown once Warcraft Logs partitions have actually been synced for a tier we hold parses in. #}
+  {% if filters.patches %}
+  <label for="f-p">Patch</label>
+  <select id="f-p" name="p" onchange="this.form.submit()">
+    <option value="">All</option>
+    {% for p in filters.patches if not tier_id or p.zone_id == tier_id %}
+    <option value="{{ p.id }}" {{ 'selected' if p.id == patch_id }}>{{ p.name }}{% if not tier_id %} · {{ p.zone }}{% endif %}</option>{% endfor %}
+  </select>
+  {% endif %}
   <label for="f-d">Difficulty</label>
   <select id="f-d" name="d" onchange="this.form.submit()">
     <option value="">All</option>
@@ -127,7 +136,7 @@
 </div>
 <small class="muted">Showing each raider's {{ metric }} on every boss in view.
   Show
-  {% for m in ('best', 'median', 'avg') if m != metric %}<a href="{{ link(request.url.path, x=expansion_id, tier=tier_id, boss=boss_id, d=difficulty, m=m) }}">{{ m }}</a>{{ ' or ' if not loop.last }}{% endfor %} instead.</small>
+  {% for m in ('best', 'median', 'avg') if m != metric %}<a href="{{ link(request.url.path, x=expansion_id, tier=tier_id, boss=boss_id, d=difficulty, p=patch_id, m=m) }}">{{ m }}</a>{{ ' or ' if not loop.last }}{% endfor %} instead.</small>
 {% endif %}
 {% endif %}
 {% endblock %}
