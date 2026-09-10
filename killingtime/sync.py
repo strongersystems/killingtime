@@ -454,6 +454,24 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
             (*zone_ids, limit),
         )
     ]
+    # Rankings fetched before partitions existed carry no patch, and a report already stamped as synced is never
+    # looked at again, so the patch filter would stay empty for ever. Re-read a few of the oldest-unchecked each
+    # run, newest first, and only while Warcraft Logs is actually giving us partitions to match them against.
+    have_partitions = conn.execute("SELECT 1 FROM zone_partitions LIMIT 1").fetchone()
+    room = max(0, limit - len(pending))
+    if have_partitions and room:
+        pending += [
+            r["code"]
+            for r in conn.execute(
+                f"""SELECT r.code FROM reports r
+                    WHERE r.zone_id IN ({placeholders}) AND r.rankings_synced_at IS NOT NULL
+                      AND r.partition_checked_at IS NULL
+                      AND EXISTS (SELECT 1 FROM parses p WHERE p.report_code = r.code AND p.partition IS NULL)
+                    ORDER BY r.start_time DESC LIMIT ?""",
+                (*zone_ids, min(room, 40)),
+            )
+        ]
+
     # Reports with no (canonical) kills never need rankings: mark them done so we don't look again.
     conn.execute(
         f"""UPDATE reports SET rankings_synced_at = ? WHERE zone_id IN ({placeholders}) AND rankings_synced_at IS NULL
@@ -504,7 +522,8 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [r for r in rows if r[4]],
             )
-            conn.execute("UPDATE reports SET rankings_synced_at = ? WHERE code = ?", (now_ms(), code))
+            conn.execute("UPDATE reports SET rankings_synced_at = ?, partition_checked_at = ? WHERE code = ?",
+                         (now_ms(), now_ms(), code))
         stats.parses += len(rows)
         done += 1
         if done % 20 == 0:

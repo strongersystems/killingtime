@@ -134,3 +134,39 @@ def test_rival_metrics(synced):
     ov = metrics.overview(conn)
     assert ov["current_tier"]["id"] == 46
     assert ov["raiderio"][0]["raid_slug"] == "the-venomous-abyss" and ov["raiderio"][0]["heroic_world"] == 1904
+
+
+def test_partition_backfill_reruns_each_report_once(synced):
+    """Parses fetched before partitions existed have to be revisited, but only ever once."""
+    from killingtime.sync import SyncStats, sync_parses
+
+    conn, wcl, _rio, settings = synced
+    zone_ids = [r["id"] for r in conn.execute("SELECT DISTINCT zone_id AS id FROM reports WHERE zone_id IS NOT NULL")]
+
+    # Pretend everything was synced before partitions were a thing.
+    conn.execute("UPDATE parses SET partition = NULL")
+    conn.execute("UPDATE reports SET partition_checked_at = NULL")
+    conn.commit()
+    stale = conn.execute(
+        "SELECT COUNT(*) c FROM reports WHERE rankings_synced_at IS NOT NULL AND partition_checked_at IS NULL"
+    ).fetchone()["c"]
+    assert stale, "fixture has no already-synced reports to backfill"
+
+    stats = SyncStats()
+    sync_parses(conn, wcl, zone_ids, stats, lambda *_: None)
+    checked = conn.execute("SELECT COUNT(*) c FROM reports WHERE partition_checked_at IS NOT NULL").fetchone()["c"]
+    assert checked, "the backfill re-read nothing"
+
+    # Every report that actually had partition-less parses has now been looked at. Reports with no parses at all
+    # are left alone, because there is nothing in them to backfill.
+    left = conn.execute(
+        """SELECT COUNT(*) c FROM reports r WHERE r.rankings_synced_at IS NOT NULL
+           AND r.partition_checked_at IS NULL
+           AND EXISTS (SELECT 1 FROM parses p WHERE p.report_code = r.code AND p.partition IS NULL)"""
+    ).fetchone()["c"]
+    assert left == 0, "a report with partition-less parses was left unchecked"
+
+    # And a second run costs nothing: the stamp stops it circling even if no partition ever came back.
+    before = wcl.queries_made
+    sync_parses(conn, wcl, zone_ids, stats, lambda *_: None)
+    assert wcl.queries_made == before, "the backfill went round again"

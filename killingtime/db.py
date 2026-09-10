@@ -280,6 +280,9 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("characters", "profile_version", "INTEGER NOT NULL DEFAULT 0"),
     # Which patch a parse was ranked in. Null for every row fetched before partitions were synced.
     ("parses", "partition", "INTEGER"),
+    # When we last re-read a report's rankings looking for the patch. Stamped whether or not one came back, so a
+    # report is re-read at most once and the backfill finishes instead of circling.
+    ("reports", "partition_checked_at", "INTEGER"),
 ]
 
 VIEWS = """
