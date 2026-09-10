@@ -114,3 +114,27 @@ def test_a_timeout_is_retried_then_reported_as_a_wcl_error():
     dead._token, dead._token_expiry = "t", time.time() + 3600
     with pytest.raises(WCLError):
         dead.query("{ ok }")
+
+
+def test_raiderio_timeout_is_retried_then_reported_as_a_raiderio_error():
+    """Same contract on the Raider.IO side: callers warn past RaiderIOError, but httpx errors kill the sync."""
+    from killingtime.raiderio import RaiderIOClient, RaiderIOError
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ReadTimeout("The read operation timed out", request=request)
+        return httpx.Response(200, json={"guilds": []})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = RaiderIOClient("https://rio.test/api/v1", http=http, min_interval_s=0)
+    assert client._get("/raiding/raid-rankings", {}) == {"guilds": []}
+    assert calls["n"] == 2
+
+    always_fails = httpx.Client(transport=httpx.MockTransport(
+        lambda r: (_ for _ in ()).throw(httpx.ConnectError("down", request=r))))
+    dead = RaiderIOClient("https://rio.test/api/v1", http=always_fails, min_interval_s=0)
+    with pytest.raises(RaiderIOError, match="request failed"):
+        dead._get("/raiding/raid-rankings", {})

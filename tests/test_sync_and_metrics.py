@@ -170,3 +170,22 @@ def test_partition_backfill_reruns_each_report_once(synced):
     before = wcl.queries_made
     sync_parses(conn, wcl, zone_ids, stats, lambda *_: None)
     assert wcl.queries_made == before, "the backfill went round again"
+
+
+def test_a_partial_sync_still_publishes(synced, monkeypatch):
+    """A third party timing out must not leave the public site serving last week's data."""
+    import pytest
+
+    from killingtime import sync as sync_mod
+
+    conn, wcl, rio, settings = synced
+    published: list[str] = []
+    monkeypatch.setattr(sync_mod, "publish", lambda *a, **k: published.append("shipped"))
+    monkeypatch.setattr(sync_mod, "sync_raiderio", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("504 from raider.io")))
+
+    with pytest.raises(RuntimeError, match="504 from raider.io"):
+        run_sync(conn, settings, wcl, rio, full=False, progress=lambda m: None)
+
+    assert published == ["shipped"], "the run failed before publishing what it had already gathered"
+    row = conn.execute("SELECT status, detail FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["status"] == "error" and "504 from raider.io" in row["detail"]

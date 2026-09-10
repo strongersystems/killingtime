@@ -947,6 +947,7 @@ def run_sync(
     log_id = cur.lastrowid
     conn.commit()
     status = "ok"
+    failure: Exception | None = None
     try:
         if wcl is not None:
             progress("== Warcraft Logs ==")
@@ -999,28 +1000,43 @@ def run_sync(
             stats.warn(f"story seeding failed: {exc}", progress)
         set_meta(conn, "last_sync", str(now_ms()))
         conn.commit()
-        from .state import configured, persist, publish_page
-
-        if configured(settings):
-            progress("snapshot uploaded" if persist(settings) else "warning: snapshot upload failed")
-            try:
-                from .public import render_public_join_page, render_public_page, render_public_team_page
-
-                pages = {"public": render_public_page(conn, settings), "team": render_public_team_page(conn, settings),
-                         "join": render_public_join_page(conn, settings)}
-            except Exception as exc:  # noqa: BLE001 - the public page must never fail the sync
-                stats.warn(f"public site render failed: {exc}", progress)
-            else:
-                ok = all(publish_page(settings, html, name=name) for name, html in pages.items())
-                progress("public site published" if ok else "warning: public site publish failed")
     except Exception as exc:  # noqa: BLE001 - we want the log row to capture any failure
         status = "error"
         stats.warn(f"sync failed: {exc}", progress)
-        raise
+        failure = exc
+
+    try:
+        # Ship whatever we did gather. When Warcraft Logs or Raider.IO time out half way through, the
+        # rows we already wrote are still newer than what the site is serving, and holding them back
+        # left the public pages stale until some later run happened to get a clean pass.
+        publish(conn, settings, stats, progress)
+    except Exception as exc:  # noqa: BLE001 - publishing must not mask the sync's own failure
+        stats.warn(f"publish failed: {exc}", progress)
     finally:
         conn.execute(
             "UPDATE sync_log SET finished_at = ?, status = ?, detail = ? WHERE id = ?",
             (now_ms(), status, json.dumps({k: v for k, v in stats.__dict__.items() if k != "warnings"} | {"warnings": stats.warnings[:50]}), log_id),
         )
         conn.commit()
+    if failure is not None:
+        raise failure
     return stats
+
+
+def publish(conn: sqlite3.Connection, settings: Settings, stats: SyncStats, progress: Progress) -> None:
+    """Upload the database snapshot and re-render the public pages from it."""
+    from .state import configured, persist, publish_page
+
+    if not configured(settings):
+        return
+    progress("snapshot uploaded" if persist(settings) else "warning: snapshot upload failed")
+    try:
+        from .public import render_public_join_page, render_public_page, render_public_team_page
+
+        pages = {"public": render_public_page(conn, settings), "team": render_public_team_page(conn, settings),
+                 "join": render_public_join_page(conn, settings)}
+    except Exception as exc:  # noqa: BLE001 - the public page must never fail the sync
+        stats.warn(f"public site render failed: {exc}", progress)
+        return
+    ok = all(publish_page(settings, html, name=name) for name, html in pages.items())
+    progress("public site published" if ok else "warning: public site publish failed")

@@ -45,14 +45,27 @@ class RaiderIOClient:
         wait = self._min_interval - (time.monotonic() - self._last_call)
         if wait > 0:
             time.sleep(wait)
-        resp = self._http.get(f"{self.base_url}{path}", params=params)
+        # A transport failure used to escape as an httpx error rather than a RaiderIOError, which meant every
+        # caller's handling missed it and one slow reply from Raider.IO ended the sync before it could publish.
+        # Their 504s come in waves, so it is worth one retry before giving up on that call and moving on.
+        def fetch() -> httpx.Response:
+            try:
+                return self._http.get(f"{self.base_url}{path}", params=params)
+            except httpx.HTTPError as exc:
+                time.sleep(2)
+                try:
+                    return self._http.get(f"{self.base_url}{path}", params=params)
+                except httpx.HTTPError as again:
+                    raise RaiderIOError(f"Raider.IO request failed for {path}: {again}") from exc
+
+        resp = fetch()
         self._last_call = time.monotonic()
         self.requests_made += 1
         if resp.status_code == 429:
             retry = float(resp.headers.get("retry-after", "5"))
             log.warning("Raider.IO rate limited; sleeping %.0fs", retry)
             time.sleep(min(retry, 30))
-            resp = self._http.get(f"{self.base_url}{path}", params=params)
+            resp = fetch()
         if resp.status_code == 400:
             raise RaiderIOError(f"Raider.IO bad request for {path}: {resp.text[:200]}")
         if resp.status_code != 200:
