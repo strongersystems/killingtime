@@ -87,3 +87,30 @@ def test_report_fights_batches_with_aliases(tmp_path):
 def test_missing_credentials():
     with pytest.raises(WCLError):
         WCLClient("", "")
+
+
+def test_a_timeout_is_retried_then_reported_as_a_wcl_error():
+    """A slow response must not escape as a transport error: every caller handles WCLError, none handle httpx."""
+    import time
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ReadTimeout("The read operation timed out", request=request)
+        return httpx.Response(200, json={"data": {"ok": True}})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = WCLClient("id", "secret", token_cache_path=None, http=http)
+    client._token, client._token_expiry = "t", time.time() + 3600
+    assert client.query("{ ok }") == {"ok": True}, "a single timeout should be retried, not fatal"
+    assert calls["n"] == 2
+
+    # A second failure is reported as a WCLError, which callers already warn on and carry past.
+    always_fails = httpx.Client(transport=httpx.MockTransport(
+        lambda r: (_ for _ in ()).throw(httpx.ConnectError("down", request=r))))
+    dead = WCLClient("id", "secret", token_cache_path=None, http=always_fails)
+    dead._token, dead._token_expiry = "t", time.time() + 3600
+    with pytest.raises(WCLError):
+        dead.query("{ ok }")

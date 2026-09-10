@@ -468,7 +468,9 @@ def sync_parses(conn: sqlite3.Connection, wcl: WCLClient, zone_ids: list[int], s
                       AND r.partition_checked_at IS NULL
                       AND EXISTS (SELECT 1 FROM parses p WHERE p.report_code = r.code AND p.partition IS NULL)
                     ORDER BY r.start_time DESC LIMIT ?""",
-                (*zone_ids, min(room, 40)),
+                # Ten a run. Rankings are the heaviest query we make and the backfill is not urgent; forty on top
+                # of a normal run pushed the sync past its budget and it timed out before it could publish.
+                (*zone_ids, min(room, 10)),
             )
         ]
 

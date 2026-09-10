@@ -98,12 +98,22 @@ class WCLClient:
 
     # --------------------------------------------------------------- GraphQL
     def query(self, gql: str, variables: dict[str, Any] | None = None, _retry: bool = True) -> dict[str, Any]:
-        """Run a GraphQL query and return the ``data`` object. Raises WCLError on any error."""
-        resp = self._http.post(
-            self.api_url,
-            json={"query": gql, "variables": variables or {}},
-            headers={"Authorization": f"Bearer {self.token()}"},
-        )
+        """Run a GraphQL query and return the ``data`` object. Raises WCLError on any error.
+
+        A read timeout used to come out as httpx.ReadTimeout, which is not a WCLError, so it sailed past every
+        caller's handling and took the whole sync down with it, publish and all. One slow response is not a reason
+        to lose an hour of work: it is retried once and then reported as a WCLError like anything else."""
+        try:
+            resp = self._http.post(
+                self.api_url,
+                json={"query": gql, "variables": variables or {}},
+                headers={"Authorization": f"Bearer {self.token()}"},
+            )
+        except httpx.HTTPError as exc:
+            if not _retry:
+                raise WCLError(f"Warcraft Logs request failed: {exc}") from exc
+            time.sleep(2)
+            return self.query(gql, variables, _retry=False)
         self.queries_made += 1
         if resp.status_code == 401 and _retry:
             self.token(force=True)
