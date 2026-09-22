@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Killing Time{% endblock %}{% if team_label %} · {{ team_label }}{% endif %} · Raid Progress</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
   <script src="/static/vendor/chart.umd.min.js"></script>
-  <script src="/static/charts.js"></script>
+  <script src="/static/charts.js?v={{ version }}"></script>
   {% block styles %}{% endblock %}
 </head>
 <body>
