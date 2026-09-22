@@ -35,10 +35,11 @@
         y: {
           title: { display: !!opts.yTitle, text: opts.yTitle, color: muted },
           grid: { color: grid, drawTicks: false }, border: { display: false },
-          /* Ranks read the other way up: #1 belongs at the top, and zero is not on the scale at all. */
+          /* Ranks read the other way up, and there is no rank zero. Don't pin the axis to #1 to hide that tick:
+             the scale has to keep auto-fitting so switching a line off in the legend re-frames what is left. */
           reverse: !!opts.yReverse,
           ticks: { color: muted, precision: 0, font: { size: 11 },
-                   ...(opts.yReverse ? { callback: (v) => "#" + v } : {}) },
+                   ...(opts.yReverse ? { callback: (v) => (v >= 1 ? "#" + v : null) } : {}) },
           beginAtZero: !opts.yReverse, stacked: !!opts.stacked, max: opts.yMax, min: opts.yMin,
         },
       },
@@ -63,6 +64,7 @@
       tension: opts.stepped || opts.smooth === false ? 0 : 0.15,
       spanGaps: true,
       fill: false,
+      hidden: !!s.hidden,
     }));
     return new Chart(canvas, { type: "line", data: { labels, datasets }, options: baseOptions({ ...opts, seriesCount: series.length }) });
   }

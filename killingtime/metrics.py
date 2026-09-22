@@ -570,6 +570,21 @@ def tier_race(conn: sqlite3.Connection, raid_slug: str, difficulty: int, axis: s
     for s in ordered:
         s["color_index"] = cast.index(s["name"]) if s["name"] in cast else len(cast)
     home = next((s for s in ordered if s["is_home"]), None)
+    # A realm-mate two hundred places away tells you something; one at #8 when you are #1,400 just flattens the
+    # axis until your own line is a straight edge at the bottom. Those start switched off, still one legend click
+    # away, so the chart opens on the band you actually raid in.
+    home_end = home["points"][-1]["y"] if home and home["points"] else None
+
+    def _end(s: dict[str, Any]) -> int | None:
+        return s["points"][-1]["y"] if s["points"] else None
+
+    others = [s for s in ordered if not s["is_home"] and _end(s) is not None]
+    if home_end:
+        # Within three times our own rank is close enough to share an axis with; of those, the nearest four.
+        others = sorted((s for s in others if _end(s) * 3 >= home_end), key=lambda s: abs(_end(s) - home_end))
+    shown = {id(s) for s in others[:4]}
+    for s in ordered:
+        s["default_on"] = bool(s["is_home"] or not home_end or id(s) in shown)
     best = [p["y"] for s in ordered for p in s["points"]]
     labels = sorted({(p["x"], p["label"].split(" · ")[0]) for s in ordered for p in s["points"]})
     return {

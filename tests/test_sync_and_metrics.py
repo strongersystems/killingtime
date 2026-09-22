@@ -240,3 +240,35 @@ def test_tier_race_series(synced):
     theirs = next(s for s in by_boss["series"] if s["name"] == "Internet Diff")
     assert [p["x"] for p in theirs["points"]] == sorted(p["x"] for p in theirs["points"])
     assert [p["kills"] for p in theirs["points"]] == [1, 2, 3], "each boss point counts what was down at that kill"
+
+
+def test_far_off_guilds_start_hidden(synced):
+    """A guild hundreds of places away flattens the axis until our own line is a straight edge at the bottom."""
+    from killingtime.config import GuildRef
+    from killingtime.sync import upsert_guild
+
+    conn, *_ = synced
+    ours = conn.execute(
+        """SELECT axis, x, kills, at_ms, label FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
+           WHERE g.is_home = 1 AND c.raid_slug = 'the-venomous-abyss' AND c.difficulty = 5 AND c.world_rank IS NOT NULL"""
+    ).fetchall()
+    assert ours, "fixture has no home curve to mirror"
+
+    # The fixture pool is three guilds, so give everyone realistic ranks: us deep in the field, one guild alongside
+    # us, one up at the sharp end.
+    conn.execute("""UPDATE world_rank_curve SET world_rank = 1413 WHERE guild_id =
+                    (SELECT id FROM guilds WHERE is_home = 1) AND world_rank IS NOT NULL""")
+    for name, rank in (("Next Door", 1360), ("Way Ahead", 8)):
+        gid = upsert_guild(conn, GuildRef(name, "draenor", "eu"))
+        for r in ours:
+            conn.execute(
+                """INSERT OR REPLACE INTO world_rank_curve(raid_slug, difficulty, guild_id, axis, x, world_rank, tied, kills, at_ms, label)
+                   VALUES ('the-venomous-abyss', 5, ?, ?, ?, ?, 1, ?, ?, ?)""",
+                (gid, r["axis"], r["x"], rank, r["kills"], r["at_ms"], r["label"]))
+    conn.commit()
+
+    by_name = {s["name"]: s for s in metrics.tier_race(conn, "the-venomous-abyss", 5, "week")["series"]}
+    assert by_name["Killing Time"]["default_on"], "our own line is always on"
+    assert by_name["Next Door"]["default_on"], "#1,360 against our #1,413 is the same race"
+    assert not by_name["Way Ahead"]["default_on"], "#8 against our #1,413 would flatten the axis"
+    assert by_name["Way Ahead"]["points"], "still drawn, just switched off, so the legend can bring it back"
