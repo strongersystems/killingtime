@@ -257,6 +257,35 @@ CREATE TABLE IF NOT EXISTS characters (
     fetched_at INTEGER NOT NULL,
     PRIMARY KEY (name, realm_slug, region)
 );
+
+-- Where a guild stood in the world as a tier went on. Raider.IO only ever reports a guild's rank *now*, so the
+-- curve is reconstructed: scan the world leaderboard deep enough to cover us, then re-sort that pool of guilds by
+-- what each of them had killed at the instant we care about. One row per guild per point on the x axis.
+CREATE TABLE IF NOT EXISTS world_rank_curve (
+    raid_slug TEXT NOT NULL REFERENCES rio_raids(slug) ON DELETE CASCADE,
+    difficulty INTEGER NOT NULL,
+    guild_id INTEGER NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+    axis TEXT NOT NULL,               -- 'week' (week of the season) or 'boss' (the raid's boss order)
+    x INTEGER NOT NULL,               -- week number, or boss ord, both 1-based
+    world_rank INTEGER,               -- NULL when the guild had not killed anything yet at that point
+    tied INTEGER,                     -- guilds sitting on the same boss count at that moment (the rank's band)
+    kills INTEGER NOT NULL,
+    at_ms INTEGER,                    -- the instant this point describes
+    label TEXT,                       -- boss name on the boss axis, the week's end date on the week axis
+    PRIMARY KEY (raid_slug, difficulty, guild_id, axis, x)
+);
+
+-- One row per raid+difficulty we have reconstructed, so the scan can be spread over several syncs and re-run
+-- oldest-first rather than all at once.
+CREATE TABLE IF NOT EXISTS world_scan (
+    raid_slug TEXT NOT NULL REFERENCES rio_raids(slug) ON DELETE CASCADE,
+    difficulty INTEGER NOT NULL,
+    scanned_at INTEGER NOT NULL,
+    pages INTEGER NOT NULL,           -- leaderboard pages read
+    pool INTEGER NOT NULL,            -- guilds in the pool the ranking was computed against
+    home_rank INTEGER,                -- our world rank in that scan, NULL if we were deeper than the scan reached
+    PRIMARY KEY (raid_slug, difficulty)
+);
 """
 
 # Columns added after the first release: (table, column, definition).

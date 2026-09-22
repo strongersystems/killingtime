@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # Raider.IO
     rio_api_url: str = "https://raider.io/api/v1"
     rio_realm_scan_pages: int = 2
+    # How many raid+difficulty world-rank curves to rebuild per sync. Each costs up to ~32 Raider.IO requests,
+    # so they are spread over several runs rather than all rebuilt at once.
+    rio_world_scan_raids: int = 2
 
     # Home guild
     guild_name: str = "Killing Time"

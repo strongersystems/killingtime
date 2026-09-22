@@ -189,3 +189,54 @@ def test_a_partial_sync_still_publishes(synced, monkeypatch):
     assert published == ["shipped"], "the run failed before publishing what it had already gathered"
     row = conn.execute("SELECT status, detail FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     assert row["status"] == "error" and "504 from raider.io" in row["detail"]
+
+
+def test_world_rank_curve_is_rebuilt_from_the_leaderboard(synced):
+    """Raider.IO only reports a rank as it stands now, so the curve has to be re-derived from kill times."""
+    conn, _wcl, _rio, _settings = synced
+    rows = {(r["guild"], r["x"]): r for r in conn.execute(
+        """SELECT g.name AS guild, c.x, c.world_rank, c.tied, c.kills FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
+           WHERE c.raid_slug = 'the-venomous-abyss' AND c.difficulty = 5 AND c.axis = 'week'""")}
+    assert rows, "no weekly curve was rebuilt"
+
+    # Internet Diff cleared 3 on 2026-08-23; Advance had 2 by 08-25; we had 1 on 08-30. By the last week that is
+    # exactly the world order, and each guild's rank must reflect only what it had killed by then.
+    last = max(x for _g, x in rows)
+    assert rows[("Internet Diff", last)]["world_rank"] == 1
+    assert rows[("Advance", last)]["world_rank"] == 2
+    assert rows[("Killing Time", last)]["world_rank"] == 3
+    assert rows[("Killing Time", last)]["kills"] == 1
+
+    # Before our first kill (2026-08-30) we are unranked, not last: Raider.IO does not list a guild with nothing down.
+    early = [r for (g, _x), r in rows.items() if g == "Killing Time" and r["kills"] == 0]
+    assert early and all(r["world_rank"] is None for r in early)
+
+    # The band travels with the rank: at the end we are alone on 1 kill, Advance alone on 2, Internet Diff alone on 3.
+    assert rows[("Killing Time", last)]["tied"] == 1
+
+    scan = conn.execute("SELECT * FROM world_scan WHERE raid_slug = 'the-venomous-abyss' AND difficulty = 5").fetchone()
+    assert scan["home_rank"] == 3 and scan["pool"] == 3
+
+    # Normal is never scanned: nobody races it, and it would double the backfill for nothing.
+    assert not conn.execute("SELECT 1 FROM world_scan WHERE difficulty < 4").fetchone()
+
+
+def test_tier_race_series(synced):
+    conn, *_ = synced
+    race = metrics.tier_race(conn, "the-venomous-abyss", 5, "week")
+    assert [s["name"] for s in race["series"]][0] == "Killing Time", "our own line comes first"
+    assert {s["name"] for s in race["series"]} == {"Killing Time", "Internet Diff", "Advance"}
+    # A colour slot per guild, stable across difficulties, and never past the palette's eight hues.
+    idx = {s["name"]: s["color_index"] for s in race["series"]}
+    assert len(set(idx.values())) == 3 and max(idx.values()) < 8
+    heroic = {s["name"]: s["color_index"] for s in metrics.tier_race(conn, "the-venomous-abyss", 4, "week")["series"]}
+    assert heroic and all(idx[name] == slot for name, slot in heroic.items() if name in idx), \
+        "switching difficulty repainted a guild that appears in both"
+    # Points only exist from a guild's first kill onwards.
+    ours = next(s for s in race["series"] if s["is_home"])
+    assert ours["points"] and all(p["y"] and p["kills"] >= 1 for p in ours["points"])
+
+    by_boss = metrics.tier_race(conn, "the-venomous-abyss", 5, "boss")
+    theirs = next(s for s in by_boss["series"] if s["name"] == "Internet Diff")
+    assert [p["x"] for p in theirs["points"]] == sorted(p["x"] for p in theirs["points"])
+    assert [p["kills"] for p in theirs["points"]] == [1, 2, 3], "each boss point counts what was down at that kill"

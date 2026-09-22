@@ -505,6 +505,87 @@ def rio_raids_for_zone(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     )
 
 
+def race_raids(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Raids the world-rank page can offer, newest first, each flagged with which difficulties have been rebuilt.
+
+    A raid qualifies on either standing: one we track progress for, or one we have already rebuilt a curve for."""
+    raids = _rows(
+        conn,
+        """SELECT r.slug, r.name, r.ord, (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = r.slug) AS bosses,
+                  (SELECT id FROM zones z WHERE z.rio_raid_slug = r.slug) AS zone_id
+           FROM rio_raids r
+           WHERE EXISTS (SELECT 1 FROM rio_progress p WHERE p.raid_slug = r.slug)
+              OR EXISTS (SELECT 1 FROM world_scan w WHERE w.raid_slug = r.slug)
+           ORDER BY r.ord DESC""",
+    )
+    scans: dict[str, dict[int, dict[str, Any]]] = {}
+    for r in _rows(conn, "SELECT raid_slug, difficulty, scanned_at, pages, pool, home_rank FROM world_scan"):
+        scans.setdefault(r["raid_slug"], {})[r["difficulty"]] = r
+    return [{**r, "scans": scans.get(r["slug"], {})} for r in raids if r["bosses"] > 1]
+
+
+def tier_race(conn: sqlite3.Connection, raid_slug: str, difficulty: int, axis: str = "week") -> dict[str, Any]:
+    """World rank through a tier, one series per guild.
+
+    ``axis`` is "week" (week of the season) or "boss" (the raid's boss order). Raider.IO only publishes a guild's
+    rank as it stands today, so these points come from ``world_rank_curve``, which sync rebuilds by re-ranking the
+    world leaderboard at each instant. A raid we have not scanned yet simply has no series."""
+    axis = "boss" if axis == "boss" else "week"
+    raid = conn.execute(
+        """SELECT slug, name, starts_at, ends_at, cutoff_at,
+                  (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = rio_raids.slug) AS bosses
+           FROM rio_raids WHERE slug = ?""", (raid_slug,)).fetchone()
+    scan = conn.execute("SELECT scanned_at, pages, pool, home_rank FROM world_scan WHERE raid_slug = ? AND difficulty = ?",
+                        (raid_slug, difficulty)).fetchone()
+    rows = _rows(
+        conn,
+        """SELECT c.guild_id, g.name, g.realm_slug, g.is_home, g.is_rival, c.x, c.world_rank, c.tied, c.kills, c.at_ms, c.label
+           FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
+           WHERE c.raid_slug = ? AND c.difficulty = ? AND c.axis = ?
+           ORDER BY g.is_home DESC, g.is_rival DESC, g.name, c.x""",
+        (raid_slug, difficulty, axis),
+    )
+    series: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        s = series.setdefault(r["guild_id"], {
+            "guild_id": r["guild_id"], "name": r["name"], "realm": r["realm_slug"],
+            "is_home": bool(r["is_home"]), "is_rival": bool(r["is_rival"]), "points": [],
+        })
+        if r["world_rank"]:  # before a guild's first kill there is no rank to draw
+            where = "Week " + str(r["x"]) if axis == "week" else r["label"]
+            tied = f" (one of {r['tied']} on {r['kills']})" if r["tied"] and r["tied"] > 1 else ""
+            s["points"].append({
+                "x": r["x"], "y": r["world_rank"], "kills": r["kills"], "tied": r["tied"],
+                "date": ms_to_date(r["at_ms"]),
+                "label": f"{where} · {r['name']} · world #{r['world_rank']} · {r['kills']} down{tied}",
+            })
+    ordered = sorted(series.values(), key=lambda s: (not s["is_home"], not s["is_rival"], s["name"]))
+    ordered = [s for s in ordered if s["points"]]
+    # A guild keeps its colour when you switch difficulty, so the slot comes from the raid's whole cast, not from
+    # this chart's series order. Otherwise flipping Heroic/Mythic repaints whoever survived the change.
+    cast = [r["name"] for r in _rows(
+        conn,
+        """SELECT g.name, MAX(g.is_home) AS is_home FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
+           WHERE c.raid_slug = ? GROUP BY g.id ORDER BY MAX(g.is_home) DESC, g.name""", (raid_slug,))]
+    for s in ordered:
+        s["color_index"] = cast.index(s["name"]) if s["name"] in cast else len(cast)
+    home = next((s for s in ordered if s["is_home"]), None)
+    best = [p["y"] for s in ordered for p in s["points"]]
+    labels = sorted({(p["x"], p["label"].split(" · ")[0]) for s in ordered for p in s["points"]})
+    return {
+        "raid": dict(raid) if raid else None,
+        "difficulty": difficulty,
+        "difficulty_name": DIFFICULTIES.get(difficulty, str(difficulty)),
+        "axis": axis,
+        "scan": dict(scan) if scan else None,
+        "series": ordered,
+        "ticks": [{"x": x, "label": lbl} for x, lbl in labels],
+        "rank_range": [min(best), max(best)] if best else None,
+        # Where our own line ends, so the page can say whether the rebuild agrees with Raider.IO's live number.
+        "home_final": home["points"][-1]["y"] if home and home["points"] else None,
+    }
+
+
 def realm_standings(conn: sqlite3.Connection, raid_slug: str, difficulty: int, limit: int = 100) -> list[dict[str, Any]]:
     """Guilds on the home realm ranked by Raider.IO realm rank for a raid/difficulty."""
     home = home_guild(conn)

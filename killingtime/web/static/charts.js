@@ -29,13 +29,17 @@
           ticks: { color: muted, maxRotation: 0, autoSkip: true, font: { size: 11 },
                    ...(opts.xLinear ? { precision: 0, callback: (v) => (opts.xTickPrefix || "") + v } : {}) },
           stacked: !!opts.stacked,
-          beginAtZero: !!opts.xLinear,
+          beginAtZero: opts.xLinear && opts.xMin === undefined,
+          min: opts.xMin,
         },
         y: {
           title: { display: !!opts.yTitle, text: opts.yTitle, color: muted },
           grid: { color: grid, drawTicks: false }, border: { display: false },
-          ticks: { color: muted, precision: 0, font: { size: 11 } },
-          beginAtZero: true, stacked: !!opts.stacked, max: opts.yMax,
+          /* Ranks read the other way up: #1 belongs at the top, and zero is not on the scale at all. */
+          reverse: !!opts.yReverse,
+          ticks: { color: muted, precision: 0, font: { size: 11 },
+                   ...(opts.yReverse ? { callback: (v) => "#" + v } : {}) },
+          beginAtZero: !opts.yReverse, stacked: !!opts.stacked, max: opts.yMax, min: opts.yMin,
         },
       },
     };
@@ -54,7 +58,9 @@
       pointBorderColor: css("--surface"),
       pointBorderWidth: 1,
       stepped: opts.stepped ? "before" : false,
-      tension: opts.stepped ? 0 : 0.15,
+      /* A spline through sparse points invents values between them, which on a rank chart reads as a place the
+         guild actually held. Pass smooth: false wherever only the plotted points are real. */
+      tension: opts.stepped || opts.smooth === false ? 0 : 0.15,
       spanGaps: true,
       fill: false,
     }));
@@ -104,7 +110,7 @@
   }
 
   /* Card with a chart, a "Table" toggle (the accessible twin), and an optional note. */
-  function mount(container, { title, labels = [], series, type = "bar", horizontal = false, stacked = false, stepped = false, xLinear = false, xTickPrefix, xTitle, yTitle, yMax, note, height }) {
+  function mount(container, { title, labels = [], series, type = "bar", horizontal = false, stacked = false, stepped = false, xLinear = false, xTickPrefix, xMin, xTitle, yTitle, yMax, yMin, yReverse = false, smooth = true, note, height }) {
     const card = document.createElement("div");
     card.className = "card";
     const id = "c" + Math.random().toString(36).slice(2, 9);
@@ -115,7 +121,7 @@
       ${note ? `<div class="chart-note">${note.replace(/</g, "&lt;")}</div>` : ""}`;
     container.appendChild(card);
     const canvas = card.querySelector("canvas");
-    const opts = { xTitle, yTitle, stacked, stepped, horizontal, xLinear, xTickPrefix, yMax };
+    const opts = { xTitle, yTitle, stacked, stepped, horizontal, xLinear, xTickPrefix, xMin, yMax, yMin, yReverse, smooth };
     if (xLinear) {
       opts.mode = "nearest";
       opts.tooltip = {

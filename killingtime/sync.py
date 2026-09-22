@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from .config import GuildRef, Settings
-from .db import RIO_DIFFICULTY_TO_CODE, set_meta, transaction
+from .db import CODE_TO_RIO_DIFFICULTY, RIO_DIFFICULTY_TO_CODE, set_meta, transaction
 from .raiderio import RaiderIOClient, RaiderIOError
 from .wcl import WCLClient, WCLError
 
@@ -39,6 +39,7 @@ class SyncStats:
     characters: int = 0
     rio_guilds: int = 0
     rio_progress_rows: int = 0
+    world_curve_points: int = 0
     warnings: list[str] = field(default_factory=list)
     wcl_queries: int = 0
     rio_requests: int = 0
@@ -708,6 +709,207 @@ def _store_ranking_entry(conn: sqlite3.Connection, entry: dict, raid_slug: str, 
 BASE_SEASON = re.compile(r"^season-[a-z]+-\d+$")
 
 
+# --------------------------------------------------------------------------------- world rank over time
+WEEK_MS = 7 * 24 * 60 * 60 * 1000
+WORLD_SCAN_MAX_PAGES = 32
+WORLD_SCAN_MARGIN_PAGES = 3
+
+
+def _pool_entry(entry: dict) -> dict:
+    """One guild from the world leaderboard, reduced to the kill times the ranking is computed from."""
+    g = entry["guild"]
+    kills = sorted(
+        (ms, d["slug"])
+        for d in entry.get("encountersDefeated") or []
+        if (ms := iso_to_ms(d.get("firstDefeated"))) is not None
+    )
+    return {
+        "name": g["name"],
+        "realm": (g.get("realm") or {}).get("slug", ""),
+        "region": (g.get("region") or {}).get("slug", ""),
+        "faction": g.get("faction"),
+        "rio_id": g.get("id"),
+        "final_rank": entry.get("rank"),
+        "times": [ms for ms, _ in kills],
+        "by_slug": {slug: ms for ms, slug in kills},
+    }
+
+
+def _standing_at(pool_entry: dict, at_ms: int) -> tuple[int, int]:
+    """(kills, last kill time) for a guild at an instant. Sorting by (-kills, last) is Raider.IO's own ordering."""
+    times = pool_entry["times"]
+    lo, hi = 0, len(times)
+    while lo < hi:  # bisect_right without importing for one call site
+        mid = (lo + hi) // 2
+        if times[mid] <= at_ms:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo, (times[lo - 1] if lo else 0)
+
+
+def _ranks_at(pool: list[dict], at_ms: int) -> dict[int, tuple[int, int]]:
+    """(rank, band size) for every pooled guild at an instant, keyed by its index in the pool.
+
+    Rank is progression order: guilds ahead are the ones with more bosses down, or the same number reached sooner.
+    Raider.IO's own live number breaks a same-progression tie by something that is not in the data it publishes
+    (in a sampled tier, 602 guilds shared one boss count and their ranks were not in kill-time order), so the band
+    size travels with the rank and the page says which one it is showing. Guilds with nothing down are unranked,
+    exactly as Raider.IO leaves them off."""
+    standings = [(i, *_standing_at(g, at_ms)) for i, g in enumerate(pool)]
+    ranked = sorted((s for s in standings if s[1] > 0), key=lambda s: (-s[1], s[2]))
+    band: dict[int, int] = {}
+    for _idx, kills, _last in ranked:
+        band[kills] = band.get(kills, 0) + 1
+    return {idx: (n, band[kills]) for n, (idx, kills, _last) in enumerate(ranked, start=1)}
+
+
+def _week_points(starts_at: int, until_ms: int) -> list[tuple[int, int]]:
+    """(week number, instant the week ends) for each week of the tier, 1-based, capped at the tier's end."""
+    if not starts_at or until_ms <= starts_at:
+        return []
+    weeks = []
+    n = 1
+    while True:
+        end = starts_at + n * WEEK_MS
+        weeks.append((n, min(end, until_ms)))
+        if end >= until_ms or n >= 60:
+            return weeks
+        n += 1
+
+
+def _curve_guilds(conn: sqlite3.Connection, pool: list[dict], home_idx: int | None, limit: int = 8) -> list[int]:
+    """Which pooled guilds get a line: us, our configured rivals, then our realm-mates nearest to us.
+
+    Anyone deeper than the scan simply has no world rank to plot, so they are left off rather than drawn flat."""
+    known = {
+        (r["name"].lower(), r["realm_slug"], r["region"]): r
+        for r in conn.execute("SELECT name, realm_slug, region, is_home, is_rival FROM guilds")
+    }
+    home = conn.execute("SELECT name, realm_slug, region FROM guilds WHERE is_home = 1").fetchone()
+    chosen: list[int] = []
+    if home_idx is not None:
+        chosen.append(home_idx)
+    rivals, neighbours = [], []
+    for i, g in enumerate(pool):
+        if i == home_idx:
+            continue
+        row = known.get((g["name"].lower(), g["realm"], g["region"]))
+        if row and row["is_rival"]:
+            rivals.append(i)
+        elif home and g["realm"] == home["realm_slug"] and g["region"] == home["region"]:
+            neighbours.append(i)
+    chosen += rivals
+    if home_idx is not None:
+        neighbours.sort(key=lambda i: abs((pool[i]["final_rank"] or 0) - (pool[home_idx]["final_rank"] or 0)))
+    return (chosen + neighbours)[:limit]
+
+
+def scan_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, raid_slug: str, difficulty: int,
+                     home: GuildRef, stats: SyncStats, progress: Progress) -> bool:
+    """Rebuild one raid+difficulty's world-rank curves. Returns False if the leaderboard could not be read."""
+    diff_name = CODE_TO_RIO_DIFFICULTY[difficulty]
+    pool: list[dict] = []
+    home_idx: int | None = None
+    pages = 0
+    stop_after: int | None = None
+    for page in range(WORLD_SCAN_MAX_PAGES):
+        try:
+            entries = rio.raid_rankings(raid_slug, diff_name, "world", page=page)
+        except RaiderIOError as exc:
+            stats.warn(f"world rankings {raid_slug}/{diff_name} p{page} failed: {exc}", progress)
+            return False
+        pages = page + 1
+        for entry in entries:
+            e = _pool_entry(entry)
+            if home_idx is None and e["name"].lower() == home.name.lower() and e["realm"] == home.realm_slug:
+                home_idx = len(pool)
+                # Keep reading a little past ourselves: guilds that finished just behind us may have led earlier on.
+                stop_after = page + WORLD_SCAN_MARGIN_PAGES
+            pool.append(e)
+        if len(entries) < 100 or (stop_after is not None and page >= stop_after):
+            break
+    if not pool:
+        return False
+
+    raid = conn.execute("SELECT starts_at, ends_at, cutoff_at FROM rio_raids WHERE slug = ?", (raid_slug,)).fetchone()
+    starts_at = raid["starts_at"] if raid else None
+    now = now_ms()
+    until = min([t for t in (raid["ends_at"] if raid else None, now) if t], default=now)
+
+    gids = {i: upsert_guild(conn, GuildRef(pool[i]["name"], pool[i]["realm"], pool[i]["region"]),
+                            faction=pool[i]["faction"], rio_id=pool[i]["rio_id"])
+            for i in _curve_guilds(conn, pool, home_idx)}
+    bosses = {r["slug"]: r for r in conn.execute(
+        "SELECT slug, name, ord FROM rio_encounters WHERE raid_slug = ? ORDER BY ord", (raid_slug,))}
+
+    # Re-sorting the pool is the expensive part, so work out every instant we need first and rank each one once.
+    weeks = _week_points(starts_at, until)
+    boss_points = [(i, bosses[slug], at) for i in gids for slug, at in pool[i]["by_slug"].items() if slug in bosses]
+    ranks_by_instant = {at: _ranks_at(pool, at) for at in {a for _, a in weeks} | {a for _, _, a in boss_points}}
+
+    rows: list[tuple] = []
+    for week, at in weeks:
+        for i, gid in gids.items():
+            kills, _ = _standing_at(pool[i], at)
+            rank, tied = ranks_by_instant[at].get(i, (None, None))
+            rows.append((raid_slug, difficulty, gid, "week", week, rank, tied, kills, at,
+                         datetime.fromtimestamp(at / 1000, UTC).strftime("%Y-%m-%d")))
+    for i, boss, at in boss_points:
+        kills, _ = _standing_at(pool[i], at)
+        rank, tied = ranks_by_instant[at].get(i, (None, None))
+        rows.append((raid_slug, difficulty, gids[i], "boss", boss["ord"], rank, tied, kills, at, boss["name"]))
+
+    with transaction(conn):
+        conn.execute("DELETE FROM world_rank_curve WHERE raid_slug = ? AND difficulty = ?", (raid_slug, difficulty))
+        conn.executemany(
+            """INSERT OR REPLACE INTO world_rank_curve(raid_slug, difficulty, guild_id, axis, x, world_rank, tied, kills, at_ms, label)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+        conn.execute(
+            """INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank) VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(raid_slug, difficulty) DO UPDATE SET scanned_at = excluded.scanned_at, pages = excluded.pages,
+                   pool = excluded.pool, home_rank = excluded.home_rank""",
+            (raid_slug, difficulty, now, pages, len(pool),
+             pool[home_idx]["final_rank"] if home_idx is not None else None),
+        )
+    stats.world_curve_points += len(rows)
+    progress(f"world rank curve {raid_slug}/{diff_name}: {len(gids)} guilds over {pages} pages "
+             f"({'we are #' + str(pool[home_idx]['final_rank']) if home_idx is not None else 'we are deeper than the scan'})")
+    return True
+
+
+def sync_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Settings, stats: SyncStats,
+                     progress: Progress) -> None:
+    """Rebuild a few raid+difficulty curves per run, oldest scan first, so no single sync pays for all of them."""
+    budget = settings.rio_world_scan_raids
+    if budget <= 0:
+        return
+    home = settings.home_guild
+    expansions = [r["expansion_id"] for r in conn.execute(
+        "SELECT DISTINCT expansion_id FROM rio_raids WHERE expansion_id IS NOT NULL ORDER BY expansion_id DESC")]
+    keep = set(expansions[: max(1, settings.sync_expansions)])
+    if not keep:
+        return
+    candidates = conn.execute(
+        f"""SELECT r.slug, p.difficulty, s.scanned_at
+            FROM rio_raids r
+            JOIN rio_progress p ON p.raid_slug = r.slug
+            JOIN guilds g ON g.id = p.guild_id AND g.is_home = 1
+            LEFT JOIN world_scan s ON s.raid_slug = r.slug AND s.difficulty = p.difficulty
+            WHERE r.expansion_id IN ({','.join('?' * len(keep))}) AND p.is_defeated = 1 AND p.difficulty >= 4
+              AND (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = r.slug) > 1
+            GROUP BY r.slug, p.difficulty
+            ORDER BY s.scanned_at IS NOT NULL, s.scanned_at, r.ord DESC, p.difficulty DESC""",
+        tuple(sorted(keep)),
+    ).fetchall()
+    for row in candidates[:budget]:
+        try:
+            scan_world_ranks(conn, rio, row["slug"], int(row["difficulty"]), home, stats, progress)
+        except RaiderIOError as exc:
+            stats.warn(f"world rank curve {row['slug']}/{row['difficulty']} failed: {exc}", progress)
+
+
+
 def season_cutoffs(seasons: list[dict], region: str) -> list[dict]:
     """Base seasons with their cut-off: the date after which kills are post-season (no Cutting Edge / Ahead of the
     Curve, Mythic+ over). Raider.IO marks it with a ``-cutoffs`` season variant, or a ``-post`` season starting then;
@@ -926,6 +1128,7 @@ def sync_raiderio(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Setti
                             except RaiderIOError as exc:
                                 stats.warn(f"could not fetch home guild page for {raid_slug}/{diff_name}: {exc}", progress)
             progress(f"raider.io realm standings synced: {realm_slug}/{region} {raid_slug}")
+    sync_world_ranks(conn, rio, settings, stats, progress)
     stats.rio_guilds = conn.execute("SELECT COUNT(*) AS c FROM guilds").fetchone()["c"]
 
 

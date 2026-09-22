@@ -30,6 +30,7 @@
       <a href="{{ link(base ~ '/nights', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/nights') }}">Nights</a>
       <a href="{{ base }}/performance" class="{{ 'active' if path.startswith(base ~ '/performance') }}">Performance</a>
       <a href="{{ base }}/history" class="{{ 'active' if path.startswith(base ~ '/history') }}">History</a>
+      <a href="{{ link(base ~ '/race', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/race') }}">World rank</a>
       <a href="{{ link(base ~ '/peers', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/peers') }}">Peers</a>
       <a href="{{ link(base ~ '/realm', tier=zone_id) }}" class="{{ 'active' if path.startswith(base ~ '/realm') }}">Realm</a>
     </nav>

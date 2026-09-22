@@ -405,6 +405,28 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
             {**c, "raids": raids, "raid": chosen, "difficulty": diff, "comparison": comparison, "standings": standings,
              "chart_data": json.dumps({"comparison": comparison, "race": race}, default=str)}), slug)
 
+    @app.get("/t/{slug}/race", response_class=HTMLResponse)
+    def race_page(request: Request, slug: str, raid: str | None = None, tier: int | None = None,
+                  d: int | None = None, axis: str | None = None):
+        c = ctx(request, slug, tier=tier, d=d)
+        with db_lock:
+            raids = metrics.race_raids(conn)
+        if not raids:
+            return with_cookie(templates.TemplateResponse(request, "race.html", {**c, "raids": [], "raid": None}), slug)
+        if not raid and c["zone_id"]:
+            raid = next((r["slug"] for r in raids if r.get("zone_id") == c["zone_id"]), None)
+        chosen = next((r for r in raids if r["slug"] == raid), raids[0])
+        # Prefer a difficulty we have actually rebuilt, so the page does not open on an empty chart.
+        scanned = sorted(chosen["scans"], reverse=True)
+        diff = d if d in (3, 4, 5) else (scanned[0] if scanned else 5)
+        axis = "boss" if axis == "boss" else "week"
+        with db_lock:
+            race = metrics.tier_race(conn, chosen["slug"], diff, axis)
+        return with_cookie(templates.TemplateResponse(
+            request, "race.html",
+            {**c, "raids": raids, "raid": chosen, "difficulty": diff, "axis": axis, "race": race,
+             "chart_data": json.dumps(race, default=str)}), slug)
+
     # Old flat URLs keep working: send them to the remembered team (or the whole guild).
     LEGACY = {"/tiers": "history", "/peers": "peers", "/rivals": "realm", "/performance": "roster", "/attendance": "roster", "/nights": "nights"}
     for old, new in LEGACY.items():

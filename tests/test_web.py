@@ -119,3 +119,22 @@ def test_patch_filter_appears_only_once_partitions_are_synced(client):
     assert metrics.team_performance(conn, partition=99)["parses"] == 0
     assert client.get("/t/guild/performance?p=2").status_code == 200
     assert client.get("/api/team-performance?patch=2").status_code == 200
+
+
+def test_world_rank_page(client):
+    for path in ["/t/guild/race", "/t/guild/race?raid=the-venomous-abyss&d=5",
+                 "/t/guild/race?raid=the-venomous-abyss&d=5&axis=boss",
+                 "/t/guild/race?raid=manaforge-omega&d=4"]:
+        assert client.get(path).status_code == 200, path
+
+    page = client.get("/t/guild/race?raid=the-venomous-abyss&d=5").text
+    assert "World rank" in page and "Internet Diff" in page and "Advance" in page
+    assert "yReverse: true" in page, "rank axes must draw #1 at the top"
+    # The boss axis is a different chart, not the same numbers relabelled.
+    boss = client.get("/t/guild/race?raid=the-venomous-abyss&d=5&axis=boss").text
+    assert "World rank at each boss kill" in boss
+    assert "World rank by week of the tier" in page
+
+    # A raid+difficulty we never scanned says so rather than drawing an empty chart.
+    empty = client.get("/t/guild/race?raid=manaforge-omega&d=4").text
+    assert "Nothing rebuilt" in empty
