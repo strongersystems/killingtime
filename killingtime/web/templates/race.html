@@ -16,9 +16,8 @@
 {% if not history.series %}
 <div class="card">
   <p>No {{ history.difficulty_name }} tiers rebuilt yet.</p>
-  <p class="muted">The sync rebuilds a couple of tiers per run, newest first, so this fills in over the next few syncs.
-    Only the two newest expansions are rebuilt, and a tier Raider.IO no longer publishes a world leaderboard for
-    cannot be rebuilt at all.</p>
+  <p class="muted">The sync rebuilds a couple of tiers per run, newest first, so this fills in over the next few
+    syncs. A tier Raider.IO no longer publishes a world leaderboard for cannot be rebuilt at all.</p>
 </div>
 {% else %}
 <div id="charts"></div>
@@ -50,6 +49,10 @@
     publish, so the only tie-break available here is who got there first. Hover a point to see how big the pack was.</p>
   {% if history.pending %}
   <p class="muted">Still to rebuild: {% for n in history.pending %}{{ n }}{{ ', ' if not loop.last }}{% endfor %}.</p>
+  {% endif %}
+  {% if history.dropped %}
+  <p class="muted">Older than the eight tiers shown: {% for n in history.dropped %}{{ n }}{{ ', ' if not loop.last }}{% endfor %}.
+    The palette runs to eight, and a ninth line would share a colour with one already on the chart.</p>
   {% endif %}
 </div>
 {% endif %}

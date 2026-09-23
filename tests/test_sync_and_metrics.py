@@ -302,3 +302,28 @@ def test_pending_lists_only_tiers_the_sync_will_reach(synced):
 
     assert "Ancient Halls" in [r["name"] for r in metrics.race_raids(conn)], "it is still listed as a raid we know"
     assert "Ancient Halls" not in metrics.rank_history(conn, 5, "week", expansions=2)["pending"]
+
+
+def test_rank_history_never_cycles_the_palette(synced):
+    """Eight hues, so eight tiers; a ninth line would share a colour and read as the same tier."""
+    conn, *_ = synced
+    gid = conn.execute("SELECT id FROM guilds WHERE is_home = 1").fetchone()["id"]
+    for n in range(12):
+        slug = f"tier-{n}"
+        conn.execute("INSERT OR REPLACE INTO rio_raids(slug, name, expansion_id, ord) VALUES (?,?,?,?)",
+                     (slug, f"Tier {n}", 11, 100 + n))
+        conn.execute("""INSERT OR REPLACE INTO world_rank_curve(raid_slug, difficulty, guild_id, axis, x,
+                        world_rank, tied, kills, at_ms, label) VALUES (?,5,?,'week',1,500,1,1,1,'x')""", (slug, gid))
+    conn.commit()
+
+    h = metrics.rank_history(conn, 5, "week")
+    assert len(h["series"]) == 8
+    assert len({s["color_index"] for s in h["series"]}) == 8 and max(s["color_index"] for s in h["series"]) < 8
+    ords = [s["ord"] for s in h["series"]]
+    assert ords == sorted(ords, reverse=True), "newest tier first"
+    expected = [r["name"] for r in conn.execute(
+        """SELECT DISTINCT r.name, r.ord FROM world_rank_curve c JOIN rio_raids r ON r.slug = c.raid_slug
+           JOIN guilds g ON g.id = c.guild_id AND g.is_home = 1 WHERE c.difficulty = 5 AND c.axis = 'week'
+           ORDER BY r.ord DESC LIMIT 8""")]
+    assert [s["name"] for s in h["series"]] == expected
+    assert h["dropped"], "the ones left off are named rather than silently missing"

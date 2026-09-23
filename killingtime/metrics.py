@@ -557,7 +557,10 @@ def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week", 
             "date": ms_to_date(r["at_ms"]),
             "label": f"{r['raid']} · {where} · world #{r['world_rank']} · {r['kills']}/{r['bosses']} down{tied}",
         })
+    # Eight hues in the palette, so eight tiers. A ninth would reuse a colour and two lines would read as one.
     ordered = sorted(series.values(), key=lambda s: -(s["ord"] or 0))
+    dropped = [s["name"] for s in ordered[8:]]
+    ordered = ordered[:8]
     for i, s in enumerate(ordered):
         s["color_index"] = i          # newest tier always slot 0, so a tier keeps its colour as older ones fill in
         s["best"] = min(p["y"] for p in s["points"])
@@ -583,6 +586,7 @@ def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week", 
         "series": ordered,
         "ticks": sorted({p["x"] for s in ordered for p in s["points"]}),
         "max_x": max(xs) if xs else 1,
+        "dropped": dropped,
         # Only tiers the sync will actually get to. Anything older than the scan window is not pending, it is
         # out of scope, and listing it reads as a queue that never moves.
         "pending": [r["name"] for r in race_raids(conn)
