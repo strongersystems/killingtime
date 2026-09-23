@@ -298,3 +298,23 @@ def test_a_raid_with_no_world_leaderboard_does_not_starve_the_queue(synced):
     # Stamped, but not offered as a rebuilt curve on the page.
     offered = {r["slug"]: r["scans"] for r in metrics.race_raids(conn)}
     assert 5 not in offered.get("manaforge-omega", {})
+
+
+def test_refreshing_raid_reference_data_keeps_rebuilt_curves(synced):
+    """INSERT OR REPLACE on rio_raids is a DELETE plus an INSERT, and world_scan/world_rank_curve cascade off it.
+
+    Every sync refreshes this reference data, so the wrong write wipes the rank curves on every single run: the
+    backfill queue reads as entirely unscanned each time and only ever redoes the newest tier."""
+    from killingtime.sync import SyncStats, _load_rio_static
+
+    conn, wcl, rio, settings = synced
+    before = conn.execute("SELECT COUNT(*) c FROM world_rank_curve").fetchone()["c"]
+    scans = conn.execute("SELECT COUNT(*) c FROM world_scan").fetchone()["c"]
+    assert before and scans, "fixture has no rebuilt curves to protect"
+
+    # Force the refresh to actually run rather than take its early return.
+    _load_rio_static(conn, rio, {"a-raid-we-do-not-have"}, SyncStats(), lambda *_: None,
+                     n_expansions=2, region="eu")
+
+    assert conn.execute("SELECT COUNT(*) c FROM world_rank_curve").fetchone()["c"] == before
+    assert conn.execute("SELECT COUNT(*) c FROM world_scan").fetchone()["c"] == scans

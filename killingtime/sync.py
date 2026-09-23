@@ -992,13 +992,19 @@ def _load_rio_static(conn: sqlite3.Connection, rio: RaiderIOClient, wanted_slugs
             continue
         with transaction(conn):
             for i, raid in enumerate(raids):
+                # Upsert, never INSERT OR REPLACE: that is a DELETE plus an INSERT, so refreshing this reference
+                # data would cascade straight through world_scan and world_rank_curve and wipe the rebuilt
+                # rank curves on every sync.
                 conn.execute(
-                    "INSERT OR REPLACE INTO rio_raids(slug, name, expansion_id, ord) VALUES (?, ?, ?, ?)",
+                    """INSERT INTO rio_raids(slug, name, expansion_id, ord) VALUES (?, ?, ?, ?)
+                       ON CONFLICT(slug) DO UPDATE SET name = excluded.name, expansion_id = excluded.expansion_id,
+                           ord = excluded.ord""",
                     (raid["slug"], raid["name"], exp_id, raid.get("id") or i),
                 )
                 for j, enc in enumerate(raid.get("encounters") or []):
                     conn.execute(
-                        "INSERT OR REPLACE INTO rio_encounters(raid_slug, slug, name, ord) VALUES (?, ?, ?, ?)",
+                        """INSERT INTO rio_encounters(raid_slug, slug, name, ord) VALUES (?, ?, ?, ?)
+                           ON CONFLICT(raid_slug, slug) DO UPDATE SET name = excluded.name, ord = excluded.ord""",
                         (raid["slug"], enc["slug"], enc["name"], enc.get("ordinal", j) if isinstance(enc.get("ordinal"), int) else j + 1),
                     )
                 missing.discard(raid["slug"])
