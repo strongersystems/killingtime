@@ -928,10 +928,11 @@ def sync_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Se
               -- by an older generation of the scan is the exception: that is stale maths, not stale data.
               AND (s.scanned_at IS NULL OR r.ends_at IS NULL OR r.ends_at > ? OR s.version < ?)
             GROUP BY r.slug, p.difficulty
-            -- COALESCE, not s.version: a never-scanned pair is NULL there, and NULL sorts last under DESC, which
-            -- would push brand new tiers behind rebuilt ones. Both are urgent.
-            ORDER BY COALESCE(s.version, -1) < ? DESC, s.scanned_at IS NOT NULL, s.scanned_at,
-                     r.ord DESC, p.difficulty DESC""",
+            -- Wrong numbers already on the page come first: a curve someone can look at today, built by a scan
+            -- we have since fixed. Then tiers with no curve at all, then ordinary re-reads of the open tier.
+            ORDER BY (s.scanned_at IS NOT NULL AND s.version < ?) DESC,
+                     s.scanned_at IS NULL DESC,
+                     s.scanned_at, r.ord DESC, p.difficulty DESC""",
         (*sorted(keep), now_ms(), WORLD_SCAN_VERSION, WORLD_SCAN_VERSION),
     ).fetchall()
     stats.world_candidates = len(candidates)

@@ -408,3 +408,29 @@ def test_closed_tiers_are_scanned_once_but_stale_maths_is_rebuilt(synced):
     mark("manaforge-omega", WORLD_SCAN_VERSION - 1)
     conn.commit()
     assert "manaforge-omega" in scanned(), "a closed tier kept numbers from a scan we have since fixed"
+
+
+def test_stale_curves_are_rebuilt_before_new_tiers_are_added(synced):
+    """Numbers already on the page, built by a scan since fixed, outrank a tier nobody has seen yet."""
+    from killingtime.sync import WORLD_SCAN_VERSION, SyncStats, sync_world_ranks
+
+    conn, _wcl, rio, settings = synced
+    conn.execute("DELETE FROM world_scan")
+    # 'the-venomous-abyss' carries visibly wrong numbers; 'manaforge-omega' has never been looked at.
+    conn.execute("""INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank, version)
+                    VALUES ('the-venomous-abyss', 5, 1, 12, 1200, 890, ?)""", (WORLD_SCAN_VERSION - 1,))
+    conn.commit()
+
+    order: list[tuple[str, int]] = []
+
+    class Recording:
+        requests_made = 0
+
+        def raid_rankings(self, raid, difficulty, region, realm=None, page=0, limit=100):
+            if (raid, difficulty) not in order:
+                order.append((raid, difficulty))
+            return []
+
+    settings = settings.model_copy(update={"rio_world_scan_raids": 1})
+    sync_world_ranks(conn, Recording(), settings, SyncStats(), lambda *_: None)
+    assert order and order[0][0] == "the-venomous-abyss", f"rebuilt the wrong thing first: {order}"
