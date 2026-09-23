@@ -46,10 +46,11 @@
   </div>
   <p class="muted">Counted against the world leaderboard as far as each scan read:
     {% for s in history.series %}{% if s.scan %}{{ s.name }} top {{ s.scan.pool|num }}{{ ' · ' if not loop.last }}{% endif %}{% endfor %}.
-    A guild that killed a boss early and then finished below that depth is not counted, so these numbers run a little
-    optimistic the deeper into the field they go — the last boss of a tier is close to exact, the first is the
-    roughest. On the week axis, once a few hundred guilds sit on the same boss count Raider.IO orders them by
-    something it does not publish, so the only tie-break here is who got there first.</p>
+    A guild that killed a boss and then finished below that depth is not counted, so a number runs a little
+    optimistic the deeper it sits — a kill in the first fifteen hundred lands within a place or two of Raider.IO's
+    own, one down near three thousand can be a hundred or so short. On the week axis, once a few hundred guilds sit
+    on the same boss count Raider.IO orders them by something it does not publish, so the only tie-break here is who
+    got there first.</p>
   {% if history.pending %}
   <p class="muted">Still to rebuild: {% for n in history.pending %}{{ n }}{{ ', ' if not loop.last }}{% endfor %}.</p>
   {% endif %}

@@ -719,7 +719,7 @@ WORLD_SCAN_MAX_PAGES = 80
 # stopping a few pages past our own rank leaves them out and every mid-tier number comes back flattered. Keep
 # reading well past ourselves - to this multiple of our rank, and never less than this floor.
 WORLD_SCAN_DEPTH_FACTOR = 3
-WORLD_SCAN_MIN_DEPTH = 3000
+WORLD_SCAN_MIN_DEPTH = 5000
 
 
 def _pool_entry(entry: dict) -> dict:
@@ -919,9 +919,12 @@ def sync_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Se
             LEFT JOIN world_scan s ON s.raid_slug = r.slug AND s.difficulty = p.difficulty
             WHERE r.expansion_id IN ({','.join('?' * len(keep))}) AND p.is_defeated = 1 AND p.difficulty >= 4
               AND (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = r.slug) > 1
+              -- A closed tier's kill times never change again, so scanning it twice buys nothing. Only the tier
+              -- still running is worth revisiting, which is what makes a deep scan affordable at all.
+              AND (s.scanned_at IS NULL OR r.ends_at IS NULL OR r.ends_at > ?)
             GROUP BY r.slug, p.difficulty
             ORDER BY s.scanned_at IS NOT NULL, s.scanned_at, r.ord DESC, p.difficulty DESC""",
-        tuple(sorted(keep)),
+        (*sorted(keep), now_ms()),
     ).fetchall()
     stats.world_candidates = len(candidates)
     stats.world_unscanned = sum(1 for r in candidates if r["scanned_at"] is None)

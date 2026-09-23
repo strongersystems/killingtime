@@ -361,3 +361,34 @@ def test_boss_axis_counts_who_killed_it_first_not_overall_standing(synced):
     after = _ranks_at(pool, pool[us]["by_slug"]["b"])[us][0]
     assert after == 1, "one boss ahead of everyone is first overall, whatever the queue for boss A said"
     assert _kill_rank(pool, "a", at_a)[0] == 4, "the boss-A queue position does not move because of boss B"
+
+
+def test_closed_tiers_are_scanned_once(synced):
+    """A finished tier's kill times never change, so re-reading thousands of leaderboard rows buys nothing.
+
+    Only the tier still running comes back round, which is what makes scanning deep enough to be accurate
+    affordable in the first place."""
+    from killingtime.sync import SyncStats, now_ms, sync_world_ranks
+
+    conn, _wcl, rio, settings = synced
+    closed, open_ = now_ms() - 86_400_000, now_ms() + 86_400_000
+    conn.execute("UPDATE rio_raids SET ends_at = ? WHERE slug = 'manaforge-omega'", (closed,))
+    conn.execute("UPDATE rio_raids SET ends_at = ? WHERE slug = 'the-venomous-abyss'", (open_,))
+    # Pretend both have already been scanned.
+    for slug in ("manaforge-omega", "the-venomous-abyss"):
+        conn.execute("""INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank)
+                        VALUES (?, 5, 1, 1, 100, 5) ON CONFLICT(raid_slug, difficulty) DO UPDATE SET scanned_at = 1""",
+                     (slug,))
+    conn.commit()
+
+    seen: list[str] = []
+
+    class Counting:
+        requests_made = 0
+
+        def raid_rankings(self, raid, difficulty, region, realm=None, page=0, limit=100):
+            seen.append(raid)
+            return []
+
+    sync_world_ranks(conn, Counting(), settings, SyncStats(), lambda *_: None)
+    assert "manaforge-omega" not in seen, "a closed tier was scanned again"
