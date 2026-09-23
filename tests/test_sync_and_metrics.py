@@ -334,7 +334,7 @@ def test_boss_axis_counts_who_killed_it_first_not_overall_standing(synced):
 
     Raider.IO shows the queue position against each kill, so that is what the boss axis has to show; the week axis
     keeps the overall standing."""
-    from killingtime.sync import _kill_rank, _ranks_at, _pool_entry
+    from killingtime.sync import _kill_rank, _pool_entry, _ranks_at
 
     def guild(name, kills):
         return _pool_entry({"guild": {"name": name, "realm": {"slug": "r"}, "region": {"slug": "eu"}},
