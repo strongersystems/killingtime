@@ -93,6 +93,8 @@
       yTitle: "World rank",
       yReverse: true,
       xMin: 1,          // weeks and bosses are 1-based; y is left to fit whatever is switched on
+      // Stop at the last week we actually have. Left to round up its own ticks, a 21 week tier drew out to 25.
+      xMax: Math.max(...race.series.flatMap((s) => s.points.map((p) => p.x))),
       smooth: false,    // only the plotted points are real ranks
       height: 420,
       note: byWeek

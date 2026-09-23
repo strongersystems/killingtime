@@ -30,7 +30,7 @@
                    ...(opts.xLinear ? { precision: 0, callback: (v) => (opts.xTickPrefix || "") + v } : {}) },
           stacked: !!opts.stacked,
           beginAtZero: opts.xLinear && opts.xMin === undefined,
-          min: opts.xMin,
+          min: opts.xMin, max: opts.xMax,
         },
         y: {
           title: { display: !!opts.yTitle, text: opts.yTitle, color: muted },
@@ -112,7 +112,7 @@
   }
 
   /* Card with a chart, a "Table" toggle (the accessible twin), and an optional note. */
-  function mount(container, { title, labels = [], series, type = "bar", horizontal = false, stacked = false, stepped = false, xLinear = false, xTickPrefix, xMin, xTitle, yTitle, yMax, yMin, yReverse = false, smooth = true, note, height }) {
+  function mount(container, { title, labels = [], series, type = "bar", horizontal = false, stacked = false, stepped = false, xLinear = false, xTickPrefix, xMin, xMax, xTitle, yTitle, yMax, yMin, yReverse = false, smooth = true, note, height }) {
     const card = document.createElement("div");
     card.className = "card";
     const id = "c" + Math.random().toString(36).slice(2, 9);
@@ -123,7 +123,7 @@
       ${note ? `<div class="chart-note">${note.replace(/</g, "&lt;")}</div>` : ""}`;
     container.appendChild(card);
     const canvas = card.querySelector("canvas");
-    const opts = { xTitle, yTitle, stacked, stepped, horizontal, xLinear, xTickPrefix, xMin, yMax, yMin, yReverse, smooth };
+    const opts = { xTitle, yTitle, stacked, stepped, horizontal, xLinear, xTickPrefix, xMin, xMax, yMax, yMin, yReverse, smooth };
     if (xLinear) {
       opts.mode = "nearest";
       opts.tooltip = {
