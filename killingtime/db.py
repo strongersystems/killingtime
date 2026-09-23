@@ -284,6 +284,7 @@ CREATE TABLE IF NOT EXISTS world_scan (
     pages INTEGER NOT NULL,           -- leaderboard pages read
     pool INTEGER NOT NULL,            -- guilds in the pool the ranking was computed against
     home_rank INTEGER,                -- our world rank in that scan, NULL if we were deeper than the scan reached
+    version INTEGER NOT NULL DEFAULT 0,  -- sync.WORLD_SCAN_VERSION when it ran; older rows get re-scanned
     PRIMARY KEY (raid_slug, difficulty)
 );
 """
@@ -312,6 +313,9 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     # When we last re-read a report's rankings looking for the patch. Stamped whether or not one came back, so a
     # report is re-read at most once and the backfill finishes instead of circling.
     ("reports", "partition_checked_at", "INTEGER"),
+    # Which generation of the world scan produced a curve. A closed tier is otherwise scanned once and would keep
+    # whatever the algorithm of the day gave it, so a fix to the maths could never reach it.
+    ("world_scan", "version", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 VIEWS = """

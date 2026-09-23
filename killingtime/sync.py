@@ -720,6 +720,9 @@ WORLD_SCAN_MAX_PAGES = 80
 # reading well past ourselves - to this multiple of our rank, and never less than this floor.
 WORLD_SCAN_DEPTH_FACTOR = 3
 WORLD_SCAN_MIN_DEPTH = 5000
+# Bump when the scan's depth or its maths change, so curves built by an older generation are rebuilt even though
+# their tier has closed. 1: original shallow scan. 2: 5,000 deep, and the boss axis counts who killed it first.
+WORLD_SCAN_VERSION = 2
 
 
 def _pool_entry(entry: dict) -> dict:
@@ -808,10 +811,11 @@ def _stamp_scan(conn: sqlite3.Connection, raid_slug: str, difficulty: int, pages
     """Record that we looked, successfully or not. The backfill order is oldest-attempt-first, so every attempt
     has to leave a mark or it repeats forever."""
     conn.execute(
-        """INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank) VALUES (?, ?, ?, ?, ?, ?)
+        """INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(raid_slug, difficulty) DO UPDATE SET scanned_at = excluded.scanned_at, pages = excluded.pages,
-               pool = excluded.pool, home_rank = excluded.home_rank""",
-        (raid_slug, difficulty, now_ms(), pages, pool, home_rank),
+               pool = excluded.pool, home_rank = excluded.home_rank, version = excluded.version""",
+        (raid_slug, difficulty, now_ms(), pages, pool, home_rank, WORLD_SCAN_VERSION),
     )
 
 
@@ -920,11 +924,15 @@ def sync_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Se
             WHERE r.expansion_id IN ({','.join('?' * len(keep))}) AND p.is_defeated = 1 AND p.difficulty >= 4
               AND (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = r.slug) > 1
               -- A closed tier's kill times never change again, so scanning it twice buys nothing. Only the tier
-              -- still running is worth revisiting, which is what makes a deep scan affordable at all.
-              AND (s.scanned_at IS NULL OR r.ends_at IS NULL OR r.ends_at > ?)
+              -- still running is worth revisiting, which is what makes a deep scan affordable at all. A curve built
+              -- by an older generation of the scan is the exception: that is stale maths, not stale data.
+              AND (s.scanned_at IS NULL OR r.ends_at IS NULL OR r.ends_at > ? OR s.version < ?)
             GROUP BY r.slug, p.difficulty
-            ORDER BY s.scanned_at IS NOT NULL, s.scanned_at, r.ord DESC, p.difficulty DESC""",
-        (*sorted(keep), now_ms()),
+            -- COALESCE, not s.version: a never-scanned pair is NULL there, and NULL sorts last under DESC, which
+            -- would push brand new tiers behind rebuilt ones. Both are urgent.
+            ORDER BY COALESCE(s.version, -1) < ? DESC, s.scanned_at IS NOT NULL, s.scanned_at,
+                     r.ord DESC, p.difficulty DESC""",
+        (*sorted(keep), now_ms(), WORLD_SCAN_VERSION, WORLD_SCAN_VERSION),
     ).fetchall()
     stats.world_candidates = len(candidates)
     stats.world_unscanned = sum(1 for r in candidates if r["scanned_at"] is None)

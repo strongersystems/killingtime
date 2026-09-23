@@ -224,12 +224,15 @@ def test_rank_history_compares_tiers_not_guilds(synced):
     conn, *_ = synced
     h = metrics.rank_history(conn, 5, "week")
     assert h["series"], "no tier series"
-    assert {s["name"] for s in h["series"]} == {"The Venomous Abyss"}, "only tiers we have scanned"
-    only = h["series"][0]
-    assert only["current"] and only["color_index"] == 0, "the newest tier leads and holds slot 0"
-    assert only["points"] and all(p["y"] and p["kills"] >= 1 for p in only["points"])
-    assert only["best"] == min(p["y"] for p in only["points"])
-    assert only["final"] == only["points"][-1]["y"]
+    scanned = {r["raid_slug"] for r in conn.execute("SELECT DISTINCT raid_slug FROM world_scan WHERE pool > 0")}
+    assert {s["slug"] for s in h["series"]} <= scanned, "a tier with no scan behind it got a line"
+    newest = h["series"][0]
+    assert newest["name"] == "The Venomous Abyss", "the newest tier leads"
+    assert newest["current"] and newest["color_index"] == 0
+    for s_ in h["series"]:
+        assert s_["points"] and all(p["y"] and p["kills"] >= 1 for p in s_["points"])
+        assert s_["best"] == min(p["y"] for p in s_["points"])
+        assert s_["final"] == s_["points"][-1]["y"]
 
     # Nobody else's line is stored any more, so nothing can leak into the chart.
     others = conn.execute(
@@ -241,6 +244,7 @@ def test_rank_history_compares_tiers_not_guilds(synced):
     pts = by_boss["series"][0]["points"]
     assert [p["x"] for p in pts] == sorted(p["x"] for p in pts)
     assert all("The Venomous Abyss" in p["label"] for p in pts), "tooltips name the tier, not the guild"
+    assert all("guild in the world to kill it" in p["label"] for p in pts), "the boss axis is a queue position"
 
 
 def test_a_raid_with_no_world_leaderboard_does_not_starve_the_queue(synced):
@@ -363,32 +367,44 @@ def test_boss_axis_counts_who_killed_it_first_not_overall_standing(synced):
     assert _kill_rank(pool, "a", at_a)[0] == 4, "the boss-A queue position does not move because of boss B"
 
 
-def test_closed_tiers_are_scanned_once(synced):
+def test_closed_tiers_are_scanned_once_but_stale_maths_is_rebuilt(synced):
     """A finished tier's kill times never change, so re-reading thousands of leaderboard rows buys nothing.
 
-    Only the tier still running comes back round, which is what makes scanning deep enough to be accurate
-    affordable in the first place."""
-    from killingtime.sync import SyncStats, now_ms, sync_world_ranks
+    The exception is a curve built by an older generation of the scan. That is stale maths, not stale data, and
+    without it a fix to the ranking could never reach a tier that has already closed - the bad numbers would be
+    frozen in for good."""
+    from killingtime.sync import WORLD_SCAN_VERSION, SyncStats, now_ms, sync_world_ranks
 
     conn, _wcl, rio, settings = synced
     closed, open_ = now_ms() - 86_400_000, now_ms() + 86_400_000
     conn.execute("UPDATE rio_raids SET ends_at = ? WHERE slug = 'manaforge-omega'", (closed,))
     conn.execute("UPDATE rio_raids SET ends_at = ? WHERE slug = 'the-venomous-abyss'", (open_,))
-    # Pretend both have already been scanned.
-    for slug in ("manaforge-omega", "the-venomous-abyss"):
-        conn.execute("""INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank)
-                        VALUES (?, 5, 1, 1, 100, 5) ON CONFLICT(raid_slug, difficulty) DO UPDATE SET scanned_at = 1""",
-                     (slug,))
+
+    def mark(slug, version):
+        conn.execute("""INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank, version)
+                        VALUES (?, 5, 1, 1, 100, 5, ?) ON CONFLICT(raid_slug, difficulty) DO UPDATE
+                        SET scanned_at = 1, version = excluded.version""", (slug, version))
+
+    def scanned():
+        seen: list[str] = []
+
+        class Counting:
+            requests_made = 0
+
+            def raid_rankings(self, raid, difficulty, region, realm=None, page=0, limit=100):
+                seen.append(raid)
+                return []
+
+        sync_world_ranks(conn, Counting(), settings, SyncStats(), lambda *_: None)
+        return seen
+
+    # Current generation, tier closed: leave it alone.
+    mark("manaforge-omega", WORLD_SCAN_VERSION)
+    mark("the-venomous-abyss", WORLD_SCAN_VERSION)
     conn.commit()
+    assert "manaforge-omega" not in scanned(), "a closed tier on the current scan was read again"
 
-    seen: list[str] = []
-
-    class Counting:
-        requests_made = 0
-
-        def raid_rankings(self, raid, difficulty, region, realm=None, page=0, limit=100):
-            seen.append(raid)
-            return []
-
-    sync_world_ranks(conn, Counting(), settings, SyncStats(), lambda *_: None)
-    assert "manaforge-omega" not in seen, "a closed tier was scanned again"
+    # Older generation, same closed tier: rebuild it, and ahead of anything merely old.
+    mark("manaforge-omega", WORLD_SCAN_VERSION - 1)
+    conn.commit()
+    assert "manaforge-omega" in scanned(), "a closed tier kept numbers from a scan we have since fixed"
