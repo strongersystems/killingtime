@@ -413,7 +413,7 @@ def create_app(settings: Settings | None = None, conn: sqlite3.Connection | None
             have = {dd for r in raids for dd in r["scans"]}
             diff = d if d in (4, 5) else (5 if 5 in have else (4 if have else 5))
             axis = "boss" if axis == "boss" else "week"
-            history = metrics.rank_history(conn, diff, axis)
+            history = metrics.rank_history(conn, diff, axis, expansions=settings.sync_expansions)
         return with_cookie(templates.TemplateResponse(
             request, "race.html",
             {**c, "raids": raids, "difficulty": diff, "axis": axis, "history": history,

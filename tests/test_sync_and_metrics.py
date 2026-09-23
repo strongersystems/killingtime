@@ -287,3 +287,18 @@ def test_refreshing_raid_reference_data_keeps_rebuilt_curves(synced):
 
     assert conn.execute("SELECT COUNT(*) c FROM world_rank_curve").fetchone()["c"] == before
     assert conn.execute("SELECT COUNT(*) c FROM world_scan").fetchone()["c"] == scans
+
+
+def test_pending_lists_only_tiers_the_sync_will_reach(synced):
+    """Tiers older than the scan window are out of scope, not queued; listing them reads as a stuck queue."""
+    conn, *_ = synced
+    conn.execute("INSERT OR REPLACE INTO rio_raids(slug, name, expansion_id, ord) VALUES ('ancient-halls','Ancient Halls',3,1)")
+    conn.execute("INSERT OR REPLACE INTO rio_encounters(raid_slug, slug, name, ord) VALUES ('ancient-halls','a','A',1)")
+    conn.execute("INSERT OR REPLACE INTO rio_encounters(raid_slug, slug, name, ord) VALUES ('ancient-halls','b','B',2)")
+    gid = conn.execute("SELECT id FROM guilds WHERE is_home = 1").fetchone()["id"]
+    conn.execute("""INSERT OR REPLACE INTO rio_progress(guild_id, raid_slug, difficulty, encounter_slug,
+                    first_defeated, is_defeated, fetched_at) VALUES (?, 'ancient-halls', 5, 'a', 1, 1, 1)""", (gid,))
+    conn.commit()
+
+    assert "Ancient Halls" in [r["name"] for r in metrics.race_raids(conn)], "it is still listed as a raid we know"
+    assert "Ancient Halls" not in metrics.rank_history(conn, 5, "week", expansions=2)["pending"]

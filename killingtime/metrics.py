@@ -525,7 +525,7 @@ def race_raids(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [{**r, "scans": scans.get(r["slug"], {})} for r in raids if r["bosses"] > 1]
 
 
-def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week") -> dict[str, Any]:
+def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week", expansions: int = 2) -> dict[str, Any]:
     """Our own world rank through each tier, one series per tier, newest first.
 
     ``axis`` is "week" (week of that tier) or "boss" (that tier's boss order), so the tiers lie on top of one
@@ -569,6 +569,12 @@ def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week") 
         (difficulty,))}
     for s in ordered:
         s["scan"] = scans.get(s["slug"])
+    keep = [r["expansion_id"] for r in _rows(
+        conn, """SELECT DISTINCT expansion_id FROM rio_raids WHERE expansion_id IS NOT NULL
+                 ORDER BY expansion_id DESC LIMIT ?""", (max(1, expansions),))]
+    in_window = {r["slug"] for r in _rows(
+        conn, f"""SELECT slug FROM rio_raids WHERE expansion_id IN ({','.join('?' * len(keep))})""",
+        tuple(keep))} if keep else set()
     xs = [p["x"] for s in ordered for p in s["points"]]
     return {
         "difficulty": difficulty,
@@ -577,7 +583,10 @@ def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week") 
         "series": ordered,
         "ticks": sorted({p["x"] for s in ordered for p in s["points"]}),
         "max_x": max(xs) if xs else 1,
-        "pending": [r["name"] for r in race_raids(conn) if difficulty not in r["scans"]],
+        # Only tiers the sync will actually get to. Anything older than the scan window is not pending, it is
+        # out of scope, and listing it reads as a queue that never moves.
+        "pending": [r["name"] for r in race_raids(conn)
+                    if difficulty not in r["scans"] and r["slug"] in in_window],
     }
 
 
