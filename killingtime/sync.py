@@ -714,8 +714,12 @@ BASE_SEASON = re.compile(r"^season-[a-z]+-\d+$")
 
 # --------------------------------------------------------------------------------- world rank over time
 WEEK_MS = 7 * 24 * 60 * 60 * 1000
-WORLD_SCAN_MAX_PAGES = 32
-WORLD_SCAN_MARGIN_PAGES = 3
+WORLD_SCAN_MAX_PAGES = 80
+# Finding ourselves is not far enough. Plenty of guilds were ahead of us early on, stalled, and finished below us;
+# stopping a few pages past our own rank leaves them out and every mid-tier number comes back flattered. Keep
+# reading well past ourselves - to this multiple of our rank, and never less than this floor.
+WORLD_SCAN_DEPTH_FACTOR = 3
+WORLD_SCAN_MIN_DEPTH = 3000
 
 
 def _pool_entry(entry: dict) -> dict:
@@ -767,6 +771,16 @@ def _ranks_at(pool: list[dict], at_ms: int) -> dict[int, tuple[int, int]]:
     return {idx: (n, band[kills]) for n, (idx, kills, _last) in enumerate(ranked, start=1)}
 
 
+def _kill_rank(pool: list[dict], slug: str, at_ms: int) -> tuple[int, int]:
+    """(our place in the queue for this boss, how many of the pool had it down by then).
+
+    This is the number Raider.IO shows against each boss: the Nth guild in the world to kill it. It needs no
+    assumption about the order guilds take bosses in, only the kill times they publish."""
+    before = sum(1 for g in pool if (t := g["by_slug"].get(slug)) is not None and t < at_ms)
+    done = sum(1 for g in pool if (t := g["by_slug"].get(slug)) is not None and t <= at_ms)
+    return before + 1, done
+
+
 def _week_points(starts_at: int, until_ms: int) -> list[tuple[int, int]]:
     """(week number, instant the week ends) for each week of the tier, 1-based, capped at the tier's end."""
     if not starts_at or until_ms <= starts_at:
@@ -808,22 +822,25 @@ def scan_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, raid_slug: s
     pool: list[dict] = []
     home_idx: int | None = None
     pages = 0
-    stop_after: int | None = None
+    want: int | None = None
     for page in range(WORLD_SCAN_MAX_PAGES):
         try:
             entries = rio.raid_rankings(raid_slug, diff_name, "world", page=page)
         except RaiderIOError as exc:
-            stats.warn(f"world rankings {raid_slug}/{diff_name} p{page} failed: {exc}", progress)
-            return False
+            if not pool:
+                stats.warn(f"world rankings {raid_slug}/{diff_name} p{page} failed: {exc}", progress)
+                return False
+            # Keep what we have: a partial pool still ranks, it just undercounts a little.
+            stats.warn(f"world rankings {raid_slug}/{diff_name} stopped at p{page}: {exc}", progress)
+            break
         pages = page + 1
         for entry in entries:
             e = _pool_entry(entry)
             if home_idx is None and e["name"].lower() == home.name.lower() and e["realm"] == home.realm_slug:
                 home_idx = len(pool)
-                # Keep reading a little past ourselves: guilds that finished just behind us may have led earlier on.
-                stop_after = page + WORLD_SCAN_MARGIN_PAGES
+                want = max(WORLD_SCAN_MIN_DEPTH, (e["final_rank"] or len(pool)) * WORLD_SCAN_DEPTH_FACTOR)
             pool.append(e)
-        if len(entries) < 100 or (stop_after is not None and page >= stop_after):
+        if len(entries) < 100 or (want is not None and len(pool) >= want):
             break
     if not pool:
         # Raider.IO drops the world leaderboard for old raids (Nerub-ar Palace already returns nothing). Stamp the
@@ -858,8 +875,11 @@ def scan_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, raid_slug: s
                          datetime.fromtimestamp(at / 1000, UTC).strftime("%Y-%m-%d")))
     for i, boss, at in boss_points:
         kills, _ = _standing_at(pool[i], at)
-        rank, tied = ranks_by_instant[at].get(i, (None, None))
-        rows.append((raid_slug, difficulty, gids[i], "boss", boss["ord"], rank, tied, kills, at, boss["name"]))
+        # The boss axis answers "where did we come in the queue for this boss", which is not the same question as
+        # "where did we stand overall at that moment" - a guild can be 2,000th to kill a boss and still finish well
+        # ahead of most of them. The week axis keeps the overall standing.
+        rank, done = _kill_rank(pool, boss["slug"], at)
+        rows.append((raid_slug, difficulty, gids[i], "boss", boss["ord"], rank, done, kills, at, boss["name"]))
 
     with transaction(conn):
         conn.execute("DELETE FROM world_rank_curve WHERE raid_slug = ? AND difficulty = ?", (raid_slug, difficulty))

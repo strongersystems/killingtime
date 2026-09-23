@@ -327,3 +327,37 @@ def test_rank_history_never_cycles_the_palette(synced):
            ORDER BY r.ord DESC LIMIT 8""")]
     assert [s["name"] for s in h["series"]] == expected
     assert h["dropped"], "the ones left off are named rather than silently missing"
+
+
+def test_boss_axis_counts_who_killed_it_first_not_overall_standing(synced):
+    """Two different questions. A guild can be 2,000th to kill a boss and still finish well ahead of most of them.
+
+    Raider.IO shows the queue position against each kill, so that is what the boss axis has to show; the week axis
+    keeps the overall standing."""
+    from killingtime.sync import _kill_rank, _ranks_at, _pool_entry
+
+    def guild(name, kills):
+        return _pool_entry({"guild": {"name": name, "realm": {"slug": "r"}, "region": {"slug": "eu"}},
+                            "encountersDefeated": [{"slug": s, "firstDefeated": t} for s, t in kills]})
+
+    # Three guilds rush boss A before us and then stop; one guild is behind us on A but clears B as well.
+    pool = [
+        guild("Rush1", [("a", "2026-01-01T00:00:00.000Z")]),
+        guild("Rush2", [("a", "2026-01-02T00:00:00.000Z")]),
+        guild("Rush3", [("a", "2026-01-03T00:00:00.000Z")]),
+        guild("Us", [("a", "2026-01-04T00:00:00.000Z"), ("b", "2026-01-05T00:00:00.000Z")]),
+        guild("Slow", [("a", "2026-01-06T00:00:00.000Z"), ("b", "2026-01-07T00:00:00.000Z")]),
+    ]
+    us, at_a = 3, pool[3]["by_slug"]["a"]
+
+    rank, done = _kill_rank(pool, "a", at_a)
+    assert rank == 4, "three guilds killed boss A before us, so we are fourth in that queue"
+    assert done == 4
+
+    # At that same instant nobody is ahead of us on progression: everyone has one boss down and we are not last in.
+    standing = _ranks_at(pool, at_a)[us][0]
+    assert standing == 4 and standing != 0
+    # After we take boss B we lead on progression while still being only fourth to have killed A.
+    after = _ranks_at(pool, pool[us]["by_slug"]["b"])[us][0]
+    assert after == 1, "one boss ahead of everyone is first overall, whatever the queue for boss A said"
+    assert _kill_rank(pool, "a", at_a)[0] == 4, "the boss-A queue position does not move because of boss B"

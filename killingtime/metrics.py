@@ -525,6 +525,13 @@ def race_raids(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [{**r, "scans": scans.get(r["slug"], {})} for r in raids if r["bosses"] > 1]
 
 
+def _ordinal(n: int | None) -> str:
+    if not n:
+        return "—"
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n:,}{suffix}"
+
+
 def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week", expansions: int = 2) -> dict[str, Any]:
     """Our own world rank through each tier, one series per tier, newest first.
 
@@ -546,16 +553,24 @@ def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week", 
     )
     series: dict[str, dict[str, Any]] = {}
     for r in rows:
+        r = dict(r) | {"date_str": ms_to_date(r["at_ms"]) or ""}
         s = series.setdefault(r["raid_slug"], {
             "slug": r["raid_slug"], "name": r["raid"], "ord": r["ord"], "bosses": r["bosses"],
             "started": ms_to_date(r["starts_at"]), "points": [],
         })
-        where = "Week " + str(r["x"]) if axis == "week" else r["label"]
-        tied = f" (one of {r['tied']} on {r['kills']})" if r["tied"] and r["tied"] > 1 else ""
+        # The two axes answer different questions, so they label differently: by week it is where we stood
+        # overall, by boss it is where we came in the queue for that one kill.
+        if axis == "week":
+            where = f"Week {r['x']}"
+            note = f" (one of {r['tied']} on {r['kills']})" if r["tied"] and r["tied"] > 1 else ""
+            body = f"world #{r['world_rank']} · {r['kills']}/{r['bosses']} down{note}"
+        else:
+            where = r["label"]
+            body = f"{_ordinal(r['world_rank'])} guild in the world to kill it · {r['date_str']}"
         s["points"].append({
             "x": r["x"], "y": r["world_rank"], "kills": r["kills"], "tied": r["tied"],
             "date": ms_to_date(r["at_ms"]),
-            "label": f"{r['raid']} · {where} · world #{r['world_rank']} · {r['kills']}/{r['bosses']} down{tied}",
+            "label": f"{r['raid']} · {where} · {body}",
         })
     # Eight hues in the palette, so eight tiers. A ninth would reuse a colour and two lines would read as one.
     ordered = sorted(series.values(), key=lambda s: -(s["ord"] or 0))

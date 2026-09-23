@@ -4,9 +4,10 @@
 <div class="page-head">
   <div><h1>World rank <span class="muted">·</span> tier by tier <span class="pill {{ history.difficulty_name|lower }}">{{ history.difficulty_name }}</span></h1>
   <small>Our own world rank through each tier, laid on top of one another so you can see whether this one is going
-    better than the last. Raider.IO only publishes a rank as it stands today, so every point is rebuilt: the world
-    leaderboard is re-sorted by what each guild had killed at that moment, and ahead of us means more bosses down or
-    the same number reached sooner. Click a tier in the legend to take it off.</small></div>
+    better than the last. Raider.IO only publishes a rank as it stands today, so every point is rebuilt from the
+    world leaderboard's kill times. <b>By week</b> is where we stood overall: ahead of us means more bosses down, or
+    the same number reached sooner. <b>By boss</b> is the number Raider.IO shows against each kill: how many guilds
+    got there first. Click a tier in the legend to take it off.</small></div>
   <div class="filters">
     <span class="seg">{% for dd in (5, 4) %}<a href="{{ link(request.url.path, d=dd, axis=axis) }}" class="{{ 'active' if dd == difficulty }}">{{ DIFFICULTIES[dd] }}</a>{% endfor %}</span>
     <span class="seg">{% for a, lbl in (('week', 'By week'), ('boss', 'By boss')) %}<a href="{{ link(request.url.path, d=difficulty, axis=a) }}" class="{{ 'active' if a == axis }}">{{ lbl }}</a>{% endfor %}</span>
@@ -43,10 +44,12 @@
     </tbody>
   </table>
   </div>
-  <p class="muted">Each tier's scan reached as deep as it needed to find us:
+  <p class="muted">Counted against the world leaderboard as far as each scan read:
     {% for s in history.series %}{% if s.scan %}{{ s.name }} top {{ s.scan.pool|num }}{{ ' · ' if not loop.last }}{% endif %}{% endfor %}.
-    Once a few hundred guilds are sitting on the same boss count, Raider.IO orders them by something it does not
-    publish, so the only tie-break available here is who got there first. Hover a point to see how big the pack was.</p>
+    A guild that killed a boss early and then finished below that depth is not counted, so these numbers run a little
+    optimistic the deeper into the field they go — the last boss of a tier is close to exact, the first is the
+    roughest. On the week axis, once a few hundred guilds sit on the same boss count Raider.IO orders them by
+    something it does not publish, so the only tie-break here is who got there first.</p>
   {% if history.pending %}
   <p class="muted">Still to rebuild: {% for n in history.pending %}{{ n }}{{ ', ' if not loop.last }}{% endfor %}.</p>
   {% endif %}
@@ -86,7 +89,7 @@
       height: 420,
       note: byWeek
         ? "Lower is better: #1 sits at the top. Every tier starts at its own week 1, so a line that sits above last tier's means we are further ahead of the world at the same point in the tier."
-        : "Every tier starts at its own first boss, so the lines compare where we stood as each kill landed rather than when it happened.",
+        : "How many guilds killed each boss before we did \u2014 the number Raider.IO shows against the kill. Every tier starts at its own first boss.",
     });
   })();
 </script>
