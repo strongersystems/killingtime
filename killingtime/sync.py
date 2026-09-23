@@ -40,6 +40,7 @@ class SyncStats:
     rio_guilds: int = 0
     rio_progress_rows: int = 0
     world_curve_points: int = 0
+    world_curves: int = 0
     warnings: list[str] = field(default_factory=list)
     wcl_queries: int = 0
     rio_requests: int = 0
@@ -805,6 +806,18 @@ def _curve_guilds(conn: sqlite3.Connection, pool: list[dict], home_idx: int | No
     return (chosen + neighbours)[:limit]
 
 
+def _stamp_scan(conn: sqlite3.Connection, raid_slug: str, difficulty: int, pages: int, pool: int,
+                home_rank: int | None) -> None:
+    """Record that we looked, successfully or not. The backfill order is oldest-attempt-first, so every attempt
+    has to leave a mark or it repeats forever."""
+    conn.execute(
+        """INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(raid_slug, difficulty) DO UPDATE SET scanned_at = excluded.scanned_at, pages = excluded.pages,
+               pool = excluded.pool, home_rank = excluded.home_rank""",
+        (raid_slug, difficulty, now_ms(), pages, pool, home_rank),
+    )
+
+
 def scan_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, raid_slug: str, difficulty: int,
                      home: GuildRef, stats: SyncStats, progress: Progress) -> bool:
     """Rebuild one raid+difficulty's world-rank curves. Returns False if the leaderboard could not be read."""
@@ -830,6 +843,11 @@ def scan_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, raid_slug: s
         if len(entries) < 100 or (stop_after is not None and page >= stop_after):
             break
     if not pool:
+        # Raider.IO drops the world leaderboard for old raids (Nerub-ar Palace already returns nothing). Stamp the
+        # attempt anyway: an unstamped raid sorts first every run, so one dead tier would starve every live one
+        # behind it forever.
+        _stamp_scan(conn, raid_slug, difficulty, pages, 0, None)
+        stats.warn(f"world rankings {raid_slug}/{diff_name}: Raider.IO has no world leaderboard for it", progress)
         return False
 
     raid = conn.execute("SELECT starts_at, ends_at, cutoff_at FROM rio_raids WHERE slug = ?", (raid_slug,)).fetchone()
@@ -865,14 +883,10 @@ def scan_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, raid_slug: s
         conn.executemany(
             """INSERT OR REPLACE INTO world_rank_curve(raid_slug, difficulty, guild_id, axis, x, world_rank, tied, kills, at_ms, label)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
-        conn.execute(
-            """INSERT INTO world_scan(raid_slug, difficulty, scanned_at, pages, pool, home_rank) VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(raid_slug, difficulty) DO UPDATE SET scanned_at = excluded.scanned_at, pages = excluded.pages,
-                   pool = excluded.pool, home_rank = excluded.home_rank""",
-            (raid_slug, difficulty, now, pages, len(pool),
-             pool[home_idx]["final_rank"] if home_idx is not None else None),
-        )
+        _stamp_scan(conn, raid_slug, difficulty, pages, len(pool),
+                    pool[home_idx]["final_rank"] if home_idx is not None else None)
     stats.world_curve_points += len(rows)
+    stats.world_curves += 1
     progress(f"world rank curve {raid_slug}/{diff_name}: {len(gids)} guilds over {pages} pages "
              f"({'we are #' + str(pool[home_idx]['final_rank']) if home_idx is not None else 'we are deeper than the scan'})")
     return True

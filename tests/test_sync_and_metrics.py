@@ -272,3 +272,29 @@ def test_far_off_guilds_start_hidden(synced):
     assert by_name["Next Door"]["default_on"], "#1,360 against our #1,413 is the same race"
     assert not by_name["Way Ahead"]["default_on"], "#8 against our #1,413 would flatten the axis"
     assert by_name["Way Ahead"]["points"], "still drawn, just switched off, so the legend can bring it back"
+
+
+def test_a_raid_with_no_world_leaderboard_does_not_starve_the_queue(synced):
+    """Raider.IO drops the world board for old raids. An unstamped raid sorts first, so one dead tier would be
+    retried on every run and nothing behind it would ever be scanned."""
+    from killingtime.sync import SyncStats, scan_world_ranks
+
+    conn, _wcl, rio, settings = synced
+
+    class NoBoard:
+        requests_made = 0
+
+        def raid_rankings(self, *a, **k):
+            return []
+
+    stats = SyncStats()
+    ok = scan_world_ranks(conn, NoBoard(), "manaforge-omega", 5, settings.home_guild, stats, lambda *_: None)
+    assert ok is False
+    row = conn.execute("SELECT * FROM world_scan WHERE raid_slug = 'manaforge-omega' AND difficulty = 5").fetchone()
+    assert row is not None, "a failed scan left no mark, so it will be retried first forever"
+    assert row["pool"] == 0 and row["scanned_at"]
+    assert any("no world leaderboard" in w for w in stats.warnings), "a silent no-op is invisible in the sync log"
+
+    # Stamped, but not offered as a rebuilt curve on the page.
+    offered = {r["slug"]: r["scans"] for r in metrics.race_raids(conn)}
+    assert 5 not in offered.get("manaforge-omega", {})

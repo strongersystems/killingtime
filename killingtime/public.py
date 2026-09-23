@@ -319,11 +319,13 @@ def last_sync_run(conn: sqlite3.Connection) -> dict[str, Any]:
     if not row:
         return {}
     warnings: list[str] = []
+    detail: dict[str, Any] = {}
     if row["detail"]:
         try:
-            warnings = (json.loads(row["detail"]).get("warnings") or [])[:5]
+            detail = json.loads(row["detail"]) or {}
         except (ValueError, AttributeError):
-            warnings = []
+            detail = {}
+        warnings = (detail.get("warnings") or [])[:5]
     return {
         "status": row["status"],
         "started": metrics.ms_to_date(row["started_at"]),
@@ -331,6 +333,8 @@ def last_sync_run(conn: sqlite3.Connection) -> dict[str, Any]:
         "finished_ms": row["finished_at"],
         "running": row["finished_at"] is None,
         "warnings": warnings,
+        # What the run actually got through, so backfill progress is visible without the site password.
+        "counts": {k: v for k, v in detail.items() if k != "warnings" and isinstance(v, int)},
     }
 
 

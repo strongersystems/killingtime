@@ -519,7 +519,8 @@ def race_raids(conn: sqlite3.Connection) -> list[dict[str, Any]]:
            ORDER BY r.ord DESC""",
     )
     scans: dict[str, dict[int, dict[str, Any]]] = {}
-    for r in _rows(conn, "SELECT raid_slug, difficulty, scanned_at, pages, pool, home_rank FROM world_scan"):
+    # A stamped scan that found nothing is a record that we tried, not a curve to offer.
+    for r in _rows(conn, "SELECT raid_slug, difficulty, scanned_at, pages, pool, home_rank FROM world_scan WHERE pool > 0"):
         scans.setdefault(r["raid_slug"], {})[r["difficulty"]] = r
     return [{**r, "scans": scans.get(r["slug"], {})} for r in raids if r["bosses"] > 1]
 
