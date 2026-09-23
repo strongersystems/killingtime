@@ -41,6 +41,8 @@ class SyncStats:
     rio_progress_rows: int = 0
     world_curve_points: int = 0
     world_curves: int = 0
+    world_candidates: int = 0
+    world_unscanned: int = 0
     warnings: list[str] = field(default_factory=list)
     wcl_queries: int = 0
     rio_requests: int = 0
@@ -916,6 +918,10 @@ def sync_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, settings: Se
             ORDER BY s.scanned_at IS NOT NULL, s.scanned_at, r.ord DESC, p.difficulty DESC""",
         tuple(sorted(keep)),
     ).fetchall()
+    stats.world_candidates = len(candidates)
+    stats.world_unscanned = sum(1 for r in candidates if r["scanned_at"] is None)
+    progress("world rank backfill queue: " + ", ".join(
+        f"{r['slug']}/{r['difficulty']}{'*' if r['scanned_at'] is None else ''}" for r in candidates[:8]) or "empty")
     for row in candidates[:budget]:
         try:
             scan_world_ranks(conn, rio, row["slug"], int(row["difficulty"]), home, stats, progress)
