@@ -525,80 +525,59 @@ def race_raids(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [{**r, "scans": scans.get(r["slug"], {})} for r in raids if r["bosses"] > 1]
 
 
-def tier_race(conn: sqlite3.Connection, raid_slug: str, difficulty: int, axis: str = "week") -> dict[str, Any]:
-    """World rank through a tier, one series per guild.
+def rank_history(conn: sqlite3.Connection, difficulty: int, axis: str = "week") -> dict[str, Any]:
+    """Our own world rank through each tier, one series per tier, newest first.
 
-    ``axis`` is "week" (week of the season) or "boss" (the raid's boss order). Raider.IO only publishes a guild's
-    rank as it stands today, so these points come from ``world_rank_curve``, which sync rebuilds by re-ranking the
-    world leaderboard at each instant. A raid we have not scanned yet simply has no series."""
+    ``axis`` is "week" (week of that tier) or "boss" (that tier's boss order), so the tiers lie on top of one
+    another and you can see whether this one is going better than the last. Raider.IO only publishes a rank as it
+    stands today, so the points come from ``world_rank_curve``, which sync rebuilds by re-ranking the world
+    leaderboard at each instant."""
     axis = "boss" if axis == "boss" else "week"
-    raid = conn.execute(
-        """SELECT slug, name, starts_at, ends_at, cutoff_at,
-                  (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = rio_raids.slug) AS bosses
-           FROM rio_raids WHERE slug = ?""", (raid_slug,)).fetchone()
-    scan = conn.execute("SELECT scanned_at, pages, pool, home_rank FROM world_scan WHERE raid_slug = ? AND difficulty = ?",
-                        (raid_slug, difficulty)).fetchone()
     rows = _rows(
         conn,
-        """SELECT c.guild_id, g.name, g.realm_slug, g.is_home, g.is_rival, c.x, c.world_rank, c.tied, c.kills, c.at_ms, c.label
-           FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
-           WHERE c.raid_slug = ? AND c.difficulty = ? AND c.axis = ?
-           ORDER BY g.is_home DESC, g.is_rival DESC, g.name, c.x""",
-        (raid_slug, difficulty, axis),
+        """SELECT c.raid_slug, r.name AS raid, r.ord, r.starts_at, c.x, c.world_rank, c.tied, c.kills, c.at_ms, c.label,
+                  (SELECT COUNT(*) FROM rio_encounters e WHERE e.raid_slug = c.raid_slug) AS bosses
+           FROM world_rank_curve c
+           JOIN rio_raids r ON r.slug = c.raid_slug
+           JOIN guilds g ON g.id = c.guild_id AND g.is_home = 1
+           WHERE c.difficulty = ? AND c.axis = ? AND c.world_rank IS NOT NULL
+           ORDER BY r.ord DESC, c.x""",
+        (difficulty, axis),
     )
-    series: dict[int, dict[str, Any]] = {}
+    series: dict[str, dict[str, Any]] = {}
     for r in rows:
-        s = series.setdefault(r["guild_id"], {
-            "guild_id": r["guild_id"], "name": r["name"], "realm": r["realm_slug"],
-            "is_home": bool(r["is_home"]), "is_rival": bool(r["is_rival"]), "points": [],
+        s = series.setdefault(r["raid_slug"], {
+            "slug": r["raid_slug"], "name": r["raid"], "ord": r["ord"], "bosses": r["bosses"],
+            "started": ms_to_date(r["starts_at"]), "points": [],
         })
-        if r["world_rank"]:  # before a guild's first kill there is no rank to draw
-            where = "Week " + str(r["x"]) if axis == "week" else r["label"]
-            tied = f" (one of {r['tied']} on {r['kills']})" if r["tied"] and r["tied"] > 1 else ""
-            s["points"].append({
-                "x": r["x"], "y": r["world_rank"], "kills": r["kills"], "tied": r["tied"],
-                "date": ms_to_date(r["at_ms"]),
-                "label": f"{where} · {r['name']} · world #{r['world_rank']} · {r['kills']} down{tied}",
-            })
-    ordered = sorted(series.values(), key=lambda s: (not s["is_home"], not s["is_rival"], s["name"]))
-    ordered = [s for s in ordered if s["points"]]
-    # A guild keeps its colour when you switch difficulty, so the slot comes from the raid's whole cast, not from
-    # this chart's series order. Otherwise flipping Heroic/Mythic repaints whoever survived the change.
-    cast = [r["name"] for r in _rows(
-        conn,
-        """SELECT g.name, MAX(g.is_home) AS is_home FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
-           WHERE c.raid_slug = ? GROUP BY g.id ORDER BY MAX(g.is_home) DESC, g.name""", (raid_slug,))]
+        where = "Week " + str(r["x"]) if axis == "week" else r["label"]
+        tied = f" (one of {r['tied']} on {r['kills']})" if r["tied"] and r["tied"] > 1 else ""
+        s["points"].append({
+            "x": r["x"], "y": r["world_rank"], "kills": r["kills"], "tied": r["tied"],
+            "date": ms_to_date(r["at_ms"]),
+            "label": f"{r['raid']} · {where} · world #{r['world_rank']} · {r['kills']}/{r['bosses']} down{tied}",
+        })
+    ordered = sorted(series.values(), key=lambda s: -(s["ord"] or 0))
+    for i, s in enumerate(ordered):
+        s["color_index"] = i          # newest tier always slot 0, so a tier keeps its colour as older ones fill in
+        s["best"] = min(p["y"] for p in s["points"])
+        s["final"] = s["points"][-1]["y"]
+        s["killed"] = s["points"][-1]["kills"]
+        s["current"] = i == 0
+    scans = {r["raid_slug"]: r for r in _rows(
+        conn, "SELECT raid_slug, scanned_at, pages, pool, home_rank FROM world_scan WHERE difficulty = ? AND pool > 0",
+        (difficulty,))}
     for s in ordered:
-        s["color_index"] = cast.index(s["name"]) if s["name"] in cast else len(cast)
-    home = next((s for s in ordered if s["is_home"]), None)
-    # A realm-mate two hundred places away tells you something; one at #8 when you are #1,400 just flattens the
-    # axis until your own line is a straight edge at the bottom. Those start switched off, still one legend click
-    # away, so the chart opens on the band you actually raid in.
-    home_end = home["points"][-1]["y"] if home and home["points"] else None
-
-    def _end(s: dict[str, Any]) -> int | None:
-        return s["points"][-1]["y"] if s["points"] else None
-
-    others = [s for s in ordered if not s["is_home"] and _end(s) is not None]
-    if home_end:
-        # Within three times our own rank is close enough to share an axis with; of those, the nearest four.
-        others = sorted((s for s in others if _end(s) * 3 >= home_end), key=lambda s: abs(_end(s) - home_end))
-    shown = {id(s) for s in others[:4]}
-    for s in ordered:
-        s["default_on"] = bool(s["is_home"] or not home_end or id(s) in shown)
-    best = [p["y"] for s in ordered for p in s["points"]]
-    labels = sorted({(p["x"], p["label"].split(" · ")[0]) for s in ordered for p in s["points"]})
+        s["scan"] = scans.get(s["slug"])
+    xs = [p["x"] for s in ordered for p in s["points"]]
     return {
-        "raid": dict(raid) if raid else None,
         "difficulty": difficulty,
         "difficulty_name": DIFFICULTIES.get(difficulty, str(difficulty)),
         "axis": axis,
-        "scan": dict(scan) if scan else None,
         "series": ordered,
-        "ticks": [{"x": x, "label": lbl} for x, lbl in labels],
-        "rank_range": [min(best), max(best)] if best else None,
-        # Where our own line ends, so the page can say whether the rebuild agrees with Raider.IO's live number.
-        "home_final": home["points"][-1]["y"] if home and home["points"] else None,
+        "ticks": sorted({p["x"] for s in ordered for p in s["points"]}),
+        "max_x": max(xs) if xs else 1,
+        "pending": [r["name"] for r in race_raids(conn) if difficulty not in r["scans"]],
     }
 
 

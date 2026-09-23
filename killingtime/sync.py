@@ -781,31 +781,12 @@ def _week_points(starts_at: int, until_ms: int) -> list[tuple[int, int]]:
         n += 1
 
 
-def _curve_guilds(conn: sqlite3.Connection, pool: list[dict], home_idx: int | None, limit: int = 8) -> list[int]:
-    """Which pooled guilds get a line: us, our configured rivals, then our realm-mates nearest to us.
+def _curve_guilds(conn: sqlite3.Connection, pool: list[dict], home_idx: int | None) -> list[int]:
+    """Whose curve we keep: our own, and only ours.
 
-    Anyone deeper than the scan simply has no world rank to plot, so they are left off rather than drawn flat."""
-    known = {
-        (r["name"].lower(), r["realm_slug"], r["region"]): r
-        for r in conn.execute("SELECT name, realm_slug, region, is_home, is_rival FROM guilds")
-    }
-    home = conn.execute("SELECT name, realm_slug, region FROM guilds WHERE is_home = 1").fetchone()
-    chosen: list[int] = []
-    if home_idx is not None:
-        chosen.append(home_idx)
-    rivals, neighbours = [], []
-    for i, g in enumerate(pool):
-        if i == home_idx:
-            continue
-        row = known.get((g["name"].lower(), g["realm"], g["region"]))
-        if row and row["is_rival"]:
-            rivals.append(i)
-        elif home and g["realm"] == home["realm_slug"] and g["region"] == home["region"]:
-            neighbours.append(i)
-    chosen += rivals
-    if home_idx is not None:
-        neighbours.sort(key=lambda i: abs((pool[i]["final_rank"] or 0) - (pool[home_idx]["final_rank"] or 0)))
-    return (chosen + neighbours)[:limit]
+    The page compares this tier against our own previous tiers, not against other guilds, so a pool entry that
+    is not us has nothing to contribute once its ranking has been counted."""
+    return [home_idx] if home_idx is not None else []
 
 
 def _stamp_scan(conn: sqlite3.Connection, raid_slug: str, difficulty: int, pages: int, pool: int,
@@ -889,8 +870,12 @@ def scan_world_ranks(conn: sqlite3.Connection, rio: RaiderIOClient, raid_slug: s
                     pool[home_idx]["final_rank"] if home_idx is not None else None)
     stats.world_curve_points += len(rows)
     stats.world_curves += 1
-    progress(f"world rank curve {raid_slug}/{diff_name}: {len(gids)} guilds over {pages} pages "
-             f"({'we are #' + str(pool[home_idx]['final_rank']) if home_idx is not None else 'we are deeper than the scan'})")
+    if home_idx is None:
+        # Nothing to draw: we finished deeper than the scan reached, so there is no rank of ours to plot.
+        stats.warn(f"world rank curve {raid_slug}/{diff_name}: we are deeper than the top {len(pool)}", progress)
+    else:
+        progress(f"world rank curve {raid_slug}/{diff_name}: #{pool[home_idx]['final_rank']} "
+                 f"over {pages} pages, {len(rows)} points")
     return True
 
 

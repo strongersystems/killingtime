@@ -1,105 +1,89 @@
 {% extends "base.html" %}
 {% block title %}World rank{% endblock %}
 {% block content %}
-{% if not raid %}
-<div class="page-head"><h1>World rank</h1></div>
-<div class="card"><p>No Raider.IO standings yet. Run a sync and come back.</p></div>
-{% else %}
 <div class="page-head">
-  <div><h1>World rank <span class="muted">·</span> {{ raid.name }} <span class="pill {{ race.difficulty_name|lower }}">{{ race.difficulty_name }}</span></h1>
-  <small>Where each guild stood in the world as the tier went on. Raider.IO only publishes a rank as it stands today,
-    so every point here is rebuilt: the world leaderboard is re-sorted by what each guild had killed at that moment.
-    Ahead of you means more bosses down, or the same number reached sooner. The chart opens on us and our nearest
-    four; click any guild in the legend to add it or take it off.</small></div>
+  <div><h1>World rank <span class="muted">·</span> tier by tier <span class="pill {{ history.difficulty_name|lower }}">{{ history.difficulty_name }}</span></h1>
+  <small>Our own world rank through each tier, laid on top of one another so you can see whether this one is going
+    better than the last. Raider.IO only publishes a rank as it stands today, so every point is rebuilt: the world
+    leaderboard is re-sorted by what each guild had killed at that moment, and ahead of us means more bosses down or
+    the same number reached sooner. Click a tier in the legend to take it off.</small></div>
   <div class="filters">
-    <form method="get" action="{{ request.url.path }}">
-      <select class="control" name="raid" onchange="this.form.submit()">
-        {% for r in raids %}<option value="{{ r.slug }}" {{ 'selected' if r.slug == raid.slug }}>{{ r.name }}{% if not r.scans %} (not rebuilt yet){% endif %}</option>{% endfor %}
-      </select>
-      <input type="hidden" name="d" value="{{ difficulty }}"><input type="hidden" name="axis" value="{{ axis }}">
-    </form>
-    <span class="seg">{% for dd in (5, 4) %}<a href="{{ link(request.url.path, raid=raid.slug, d=dd, axis=axis) }}" class="{{ 'active' if dd == difficulty }}">{{ DIFFICULTIES[dd] }}</a>{% endfor %}</span>
-    <span class="seg">{% for a, lbl in (('week', 'By week'), ('boss', 'By boss')) %}<a href="{{ link(request.url.path, raid=raid.slug, d=difficulty, axis=a) }}" class="{{ 'active' if a == axis }}">{{ lbl }}</a>{% endfor %}</span>
+    <span class="seg">{% for dd in (5, 4) %}<a href="{{ link(request.url.path, d=dd, axis=axis) }}" class="{{ 'active' if dd == difficulty }}">{{ DIFFICULTIES[dd] }}</a>{% endfor %}</span>
+    <span class="seg">{% for a, lbl in (('week', 'By week'), ('boss', 'By boss')) %}<a href="{{ link(request.url.path, d=difficulty, axis=a) }}" class="{{ 'active' if a == axis }}">{{ lbl }}</a>{% endfor %}</span>
   </div>
 </div>
 
-{% if not race.series %}
+{% if not history.series %}
 <div class="card">
-  <p>Nothing rebuilt for {{ raid.name }} {{ race.difficulty_name }} yet.{% if raid.scans %} We have {% for d in raid.scans %}{{ DIFFICULTIES[d] }}{{ ', ' if not loop.last }}{% endfor %} for this raid — try the difficulty switch above.{% endif %}</p>
-  <p class="muted">The sync rebuilds a couple of raid/difficulty curves per run, oldest first, so this fills in over the next few syncs.
-    Only the two newest expansions are rebuilt.</p>
+  <p>No {{ history.difficulty_name }} tiers rebuilt yet.</p>
+  <p class="muted">The sync rebuilds a couple of tiers per run, newest first, so this fills in over the next few syncs.
+    Only the two newest expansions are rebuilt, and a tier Raider.IO no longer publishes a world leaderboard for
+    cannot be rebuilt at all.</p>
 </div>
 {% else %}
 <div id="charts"></div>
 
 <div class="card" style="margin-top:1rem">
-  <h2>{{ "Where we were, week by week" if axis == "week" else "Where we were at each kill" }}</h2>
+  <h2>{{ "Tier by tier, week by week" if axis == "week" else "Tier by tier, kill by kill" }}</h2>
   <div class="table-scroll">
   <table>
-    <thead><tr><th>Guild</th><th class="num">Best</th><th class="num">Finished</th><th class="num">Killed</th>
-      {% for t in race.ticks %}<th class="num">{{ t.label }}</th>{% endfor %}</tr></thead>
+    <thead><tr><th>Tier</th><th>Opened</th><th class="num">Best</th><th class="num">Ended</th><th class="num">Killed</th>
+      {% for x in history.ticks %}<th class="num">{{ ('wk ' ~ x) if axis == 'week' else ('boss ' ~ x) }}</th>{% endfor %}</tr></thead>
     <tbody>
-    {% for s in race.series %}
+    {% for s in history.series %}
     {% set by_x = {} %}{% for p in s.points %}{% set _ = by_x.update({p.x: p}) %}{% endfor %}
-    <tr class="{{ 'home' if s.is_home else ('rival' if s.is_rival) }}">
-      <td>{{ s.name }}{% if s.realm != settings.guild_realm|lower|replace(' ', '-') %} <small>({{ s.realm }})</small>{% endif %}</td>
-      <td class="num">#{{ s.points|map(attribute='y')|min|num }}</td>
-      <td class="num">#{{ s.points[-1].y|num }}</td>
-      <td class="num">{{ s.points[-1].kills }}/{{ raid.bosses }}</td>
-      {% for t in race.ticks %}<td class="num" title="{{ by_x[t.x].date if t.x in by_x else '' }}">{% if t.x in by_x %}#{{ by_x[t.x].y|num }}{% else %}—{% endif %}</td>{% endfor %}
+    <tr class="{{ 'home' if s.current }}">
+      <td>{{ s.name }}{% if s.current %} <small class="muted">current</small>{% endif %}</td>
+      <td>{{ s.started or '—' }}</td>
+      <td class="num">#{{ s.best|num }}</td>
+      <td class="num">#{{ s.final|num }}</td>
+      <td class="num">{{ s.killed }}/{{ s.bosses }}</td>
+      {% for x in history.ticks %}<td class="num" title="{{ by_x[x].date if x in by_x else '' }}{% if x in by_x %} · {{ by_x[x].kills }} down{% endif %}">{% if x in by_x %}#{{ by_x[x].y|num }}{% else %}—{% endif %}</td>{% endfor %}
     </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
-  {% if race.scan %}
-  <p class="muted">Rebuilt {{ race.scan.scanned_at|date }} against the top {{ race.scan.pool|num }} guilds in the world
-    ({{ race.scan.pages }} leaderboard pages). A guild that ended deeper than the scan reached has no line: there is no
-    honest rank to draw for it.</p>
-  {% if race.scan.home_rank and race.home_final %}
-  <p class="muted">Raider.IO currently shows {{ settings.guild_name }} at <b>#{{ race.scan.home_rank|num }}</b> for this raid
-    {%- if race.scan.home_rank == race.home_final %}, which is where this chart ends too.
-    {%- else %}, where this chart ends at <b>#{{ race.home_final|num }}</b>. Once a few hundred guilds are sitting on the
-    same boss count, Raider.IO orders them by something it does not publish, so the only tie-break available here is who
-    got there first. Hover a point to see how big the pack was.{% endif %}</p>
-  {% endif %}
+  <p class="muted">Each tier's scan reached as deep as it needed to find us:
+    {% for s in history.series %}{% if s.scan %}{{ s.name }} top {{ s.scan.pool|num }}{{ ' · ' if not loop.last }}{% endif %}{% endfor %}.
+    Once a few hundred guilds are sitting on the same boss count, Raider.IO orders them by something it does not
+    publish, so the only tie-break available here is who got there first. Hover a point to see how big the pack was.</p>
+  {% if history.pending %}
+  <p class="muted">Still to rebuild: {% for n in history.pending %}{{ n }}{{ ', ' if not loop.last }}{% endfor %}.</p>
   {% endif %}
 </div>
-{% endif %}
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
-{% if race and race.series %}
+{% if history and history.series %}
 <script>
   (function () {
-    const race = {{ chart_data|safe }};
+    const history = {{ chart_data|safe }};
     const colors = KT.palette();
-    const byWeek = race.axis === "week";
-    const series = race.series.map((s) => ({
+    const byWeek = history.axis === "week";
+    const series = history.series.map((s) => ({
       name: s.name,
       color: colors[s.color_index % colors.length],
-      emphasis: s.is_home,
-      hidden: !s.default_on,
+      emphasis: s.current,
       data: s.points.map((p) => ({ x: p.x, y: p.y, label: p.label })),
     }));
     KT.mount(document.getElementById("charts"), {
-      title: byWeek ? "World rank by week of the tier" : "World rank at each boss kill",
+      title: byWeek ? "Our world rank by week of each tier" : "Our world rank at each boss kill",
       series,
       type: "line",
       xLinear: true,
       xTickPrefix: byWeek ? "wk " : "boss ",
-      xTitle: byWeek ? "Week of tier" : "Boss",
+      xTitle: byWeek ? "Week of tier" : "Boss of tier",
       yTitle: "World rank",
       yReverse: true,
-      xMin: 1,          // weeks and bosses are 1-based; y is left to fit whatever is switched on
-      // Stop at the last week we actually have. Left to round up its own ticks, a 21 week tier drew out to 25.
-      xMax: Math.max(...race.series.flatMap((s) => s.points.map((p) => p.x))),
+      xMin: 1,
+      xMax: history.max_x,
       smooth: false,    // only the plotted points are real ranks
       height: 420,
       note: byWeek
-        ? "Lower is better: #1 sits at the top. A line starts at a guild's first kill of the tier, and the rank is progression order \u2014 more bosses down, or the same number reached sooner. Guilds far outside our band start switched off; click them in the legend to bring them in."
-        : "One point per boss, placed at the moment that guild first killed it, ranked against everyone else's progress at that instant.",
+        ? "Lower is better: #1 sits at the top. Every tier starts at its own week 1, so a line that sits above last tier's means we are further ahead of the world at the same point in the tier."
+        : "Every tier starts at its own first boss, so the lines compare where we stood as each kill landed rather than when it happened.",
     });
   })();
 </script>

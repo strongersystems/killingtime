@@ -192,27 +192,25 @@ def test_a_partial_sync_still_publishes(synced, monkeypatch):
 
 
 def test_world_rank_curve_is_rebuilt_from_the_leaderboard(synced):
-    """Raider.IO only reports a rank as it stands now, so the curve has to be re-derived from kill times."""
-    conn, _wcl, _rio, _settings = synced
-    rows = {(r["guild"], r["x"]): r for r in conn.execute(
-        """SELECT g.name AS guild, c.x, c.world_rank, c.tied, c.kills FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
-           WHERE c.raid_slug = 'the-venomous-abyss' AND c.difficulty = 5 AND c.axis = 'week'""")}
+    """Raider.IO only reports a rank as it stands now, so the curve has to be re-derived from kill times.
+
+    Only our own line is stored: the other guilds in the pool decide where we sit and are then discarded."""
+    conn, *_ = synced
+    rows = {r["x"]: r for r in conn.execute(
+        """SELECT c.x, c.world_rank, c.tied, c.kills FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
+           WHERE g.is_home = 1 AND c.raid_slug = 'the-venomous-abyss' AND c.difficulty = 5 AND c.axis = 'week'""")}
     assert rows, "no weekly curve was rebuilt"
 
-    # Internet Diff cleared 3 on 2026-08-23; Advance had 2 by 08-25; we had 1 on 08-30. By the last week that is
-    # exactly the world order, and each guild's rank must reflect only what it had killed by then.
-    last = max(x for _g, x in rows)
-    assert rows[("Internet Diff", last)]["world_rank"] == 1
-    assert rows[("Advance", last)]["world_rank"] == 2
-    assert rows[("Killing Time", last)]["world_rank"] == 3
-    assert rows[("Killing Time", last)]["kills"] == 1
+    # Internet Diff cleared 3 on 2026-08-23 and Advance had 2 by 08-25; we killed our first on 08-30. So by the
+    # last week we are third, and the rank reflects only what each guild had down by then.
+    last = max(rows)
+    assert rows[last]["world_rank"] == 3
+    assert rows[last]["kills"] == 1
+    assert rows[last]["tied"] == 1  # alone on one kill
 
-    # Before our first kill (2026-08-30) we are unranked, not last: Raider.IO does not list a guild with nothing down.
-    early = [r for (g, _x), r in rows.items() if g == "Killing Time" and r["kills"] == 0]
+    # Before our first kill we are unranked, not last: Raider.IO does not list a guild with nothing down.
+    early = [r for r in rows.values() if r["kills"] == 0]
     assert early and all(r["world_rank"] is None for r in early)
-
-    # The band travels with the rank: at the end we are alone on 1 kill, Advance alone on 2, Internet Diff alone on 3.
-    assert rows[("Killing Time", last)]["tied"] == 1
 
     scan = conn.execute("SELECT * FROM world_scan WHERE raid_slug = 'the-venomous-abyss' AND difficulty = 5").fetchone()
     assert scan["home_rank"] == 3 and scan["pool"] == 3
@@ -221,57 +219,28 @@ def test_world_rank_curve_is_rebuilt_from_the_leaderboard(synced):
     assert not conn.execute("SELECT 1 FROM world_scan WHERE difficulty < 4").fetchone()
 
 
-def test_tier_race_series(synced):
+def test_rank_history_compares_tiers_not_guilds(synced):
+    """The page lays our own tiers on top of each other; other guilds are counted, never plotted."""
     conn, *_ = synced
-    race = metrics.tier_race(conn, "the-venomous-abyss", 5, "week")
-    assert [s["name"] for s in race["series"]][0] == "Killing Time", "our own line comes first"
-    assert {s["name"] for s in race["series"]} == {"Killing Time", "Internet Diff", "Advance"}
-    # A colour slot per guild, stable across difficulties, and never past the palette's eight hues.
-    idx = {s["name"]: s["color_index"] for s in race["series"]}
-    assert len(set(idx.values())) == 3 and max(idx.values()) < 8
-    heroic = {s["name"]: s["color_index"] for s in metrics.tier_race(conn, "the-venomous-abyss", 4, "week")["series"]}
-    assert heroic and all(idx[name] == slot for name, slot in heroic.items() if name in idx), \
-        "switching difficulty repainted a guild that appears in both"
-    # Points only exist from a guild's first kill onwards.
-    ours = next(s for s in race["series"] if s["is_home"])
-    assert ours["points"] and all(p["y"] and p["kills"] >= 1 for p in ours["points"])
+    h = metrics.rank_history(conn, 5, "week")
+    assert h["series"], "no tier series"
+    assert {s["name"] for s in h["series"]} == {"The Venomous Abyss"}, "only tiers we have scanned"
+    only = h["series"][0]
+    assert only["current"] and only["color_index"] == 0, "the newest tier leads and holds slot 0"
+    assert only["points"] and all(p["y"] and p["kills"] >= 1 for p in only["points"])
+    assert only["best"] == min(p["y"] for p in only["points"])
+    assert only["final"] == only["points"][-1]["y"]
 
-    by_boss = metrics.tier_race(conn, "the-venomous-abyss", 5, "boss")
-    theirs = next(s for s in by_boss["series"] if s["name"] == "Internet Diff")
-    assert [p["x"] for p in theirs["points"]] == sorted(p["x"] for p in theirs["points"])
-    assert [p["kills"] for p in theirs["points"]] == [1, 2, 3], "each boss point counts what was down at that kill"
+    # Nobody else's line is stored any more, so nothing can leak into the chart.
+    others = conn.execute(
+        """SELECT COUNT(*) c FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id WHERE g.is_home = 0"""
+    ).fetchone()["c"]
+    assert others == 0, "a rival's curve was kept; this page does not compare against other guilds"
 
-
-def test_far_off_guilds_start_hidden(synced):
-    """A guild hundreds of places away flattens the axis until our own line is a straight edge at the bottom."""
-    from killingtime.config import GuildRef
-    from killingtime.sync import upsert_guild
-
-    conn, *_ = synced
-    ours = conn.execute(
-        """SELECT axis, x, kills, at_ms, label FROM world_rank_curve c JOIN guilds g ON g.id = c.guild_id
-           WHERE g.is_home = 1 AND c.raid_slug = 'the-venomous-abyss' AND c.difficulty = 5 AND c.world_rank IS NOT NULL"""
-    ).fetchall()
-    assert ours, "fixture has no home curve to mirror"
-
-    # The fixture pool is three guilds, so give everyone realistic ranks: us deep in the field, one guild alongside
-    # us, one up at the sharp end.
-    conn.execute("""UPDATE world_rank_curve SET world_rank = 1413 WHERE guild_id =
-                    (SELECT id FROM guilds WHERE is_home = 1) AND world_rank IS NOT NULL""")
-    for name, rank in (("Next Door", 1360), ("Way Ahead", 8)):
-        gid = upsert_guild(conn, GuildRef(name, "draenor", "eu"))
-        for r in ours:
-            conn.execute(
-                """INSERT OR REPLACE INTO world_rank_curve(raid_slug, difficulty, guild_id, axis, x, world_rank, tied, kills, at_ms, label)
-                   VALUES ('the-venomous-abyss', 5, ?, ?, ?, ?, 1, ?, ?, ?)""",
-                (gid, r["axis"], r["x"], rank, r["kills"], r["at_ms"], r["label"]))
-    conn.commit()
-
-    by_name = {s["name"]: s for s in metrics.tier_race(conn, "the-venomous-abyss", 5, "week")["series"]}
-    assert by_name["Killing Time"]["default_on"], "our own line is always on"
-    assert by_name["Next Door"]["default_on"], "#1,360 against our #1,413 is the same race"
-    assert not by_name["Way Ahead"]["default_on"], "#8 against our #1,413 would flatten the axis"
-    assert by_name["Way Ahead"]["points"], "still drawn, just switched off, so the legend can bring it back"
+    by_boss = metrics.rank_history(conn, 5, "boss")
+    pts = by_boss["series"][0]["points"]
+    assert [p["x"] for p in pts] == sorted(p["x"] for p in pts)
+    assert all("The Venomous Abyss" in p["label"] for p in pts), "tooltips name the tier, not the guild"
 
 
 def test_a_raid_with_no_world_leaderboard_does_not_starve_the_queue(synced):

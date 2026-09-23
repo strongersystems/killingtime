@@ -122,19 +122,20 @@ def test_patch_filter_appears_only_once_partitions_are_synced(client):
 
 
 def test_world_rank_page(client):
-    for path in ["/t/guild/race", "/t/guild/race?raid=the-venomous-abyss&d=5",
-                 "/t/guild/race?raid=the-venomous-abyss&d=5&axis=boss",
-                 "/t/guild/race?raid=manaforge-omega&d=4"]:
+    """One line per tier, all of them ours - the page compares us against our own previous tiers."""
+    for path in ["/t/guild/race", "/t/guild/race?d=5", "/t/guild/race?d=5&axis=boss", "/t/guild/race?d=4"]:
         assert client.get(path).status_code == 200, path
 
-    page = client.get("/t/guild/race?raid=the-venomous-abyss&d=5").text
-    assert "World rank" in page and "Internet Diff" in page and "Advance" in page
+    page = client.get("/t/guild/race?d=5").text
+    assert "tier by tier" in page and "The Venomous Abyss" in page
     assert "yReverse: true" in page, "rank axes must draw #1 at the top"
-    # The boss axis is a different chart, not the same numbers relabelled.
-    boss = client.get("/t/guild/race?raid=the-venomous-abyss&d=5&axis=boss").text
-    assert "World rank at each boss kill" in boss
-    assert "World rank by week of the tier" in page
+    assert "Our world rank by week of each tier" in page
+    # Nobody else belongs on this chart.
+    assert "Internet Diff" not in page and "Advance" not in page
 
-    # A raid+difficulty we never scanned says so rather than drawing an empty chart.
-    empty = client.get("/t/guild/race?raid=manaforge-omega&d=4").text
-    assert "Nothing rebuilt" in empty
+    boss = client.get("/t/guild/race?d=5&axis=boss").text
+    assert "Our world rank at each boss kill" in boss and "Tier by tier, kill by kill" in boss
+
+    heroic = client.get("/t/guild/race?d=4").text
+    assert "Heroic" in heroic and "Our world rank by week of each tier" in heroic
+    assert "Internet Diff" not in heroic
